@@ -9,4 +9,24 @@ def resource_path(name: str) -> Path:
     return p if p.exists() else Path(__file__).parent / "resources" / name
 
 
-EXAMPLE_DTM = "exampleDTM.tif"
+def example_mk_path() -> str:
+    """Placeholder path in the OS' own style."""
+    if sys.platform == "win32":
+        return r"F:\BEPICOLOMBO_ops\data\SPICE\BEPICOLOMBO\kernels\mk\bc_nadir_plan_ES.tm"
+    return "~/BEPICOLOMBO_ops/data/SPICE/BEPICOLOMBO/kernels/mk/bc_nadir_plan_ES.tm"
+
+
+def example_out_dir() -> str:
+    return r"F:\BEPICOLOMBO_ops" if sys.platform == "win32" else "~/BEPICOLOMBO_ops"
+
+
+EXAMPLE_DTMS = {"STC": "exampleDTM_STC.tif", "HRIC": "exampleDTM_HRIC.tif"}
+
+
+def dtm_family(channel: str) -> str:
+    """Reference-DTM family of a channel: HRIC has its own terrain, STC (-H/-L) and VIHI share the other."""
+    return "HRIC" if channel.upper().startswith("HRIC") else "STC"
+
+
+def default_dtm(channel: str) -> Path:
+    return resource_path(EXAMPLE_DTMS[dtm_family(channel)])

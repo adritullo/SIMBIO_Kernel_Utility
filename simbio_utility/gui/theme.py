@@ -21,8 +21,8 @@ from ..resources import resource_path
 
 ARROW = resource_path("arrow-down.png").as_posix()
 CHECK = resource_path("check.png").as_posix()
-MONO = "Cascadia Mono, Consolas, 'DejaVu Sans Mono', monospace"
-SANS = "Segoe UI Variable Text, Segoe UI, Inter, 'DejaVu Sans', sans-serif"
+MONO = "Cascadia Mono, Consolas, Menlo, 'SF Mono', 'Liberation Mono', 'DejaVu Sans Mono', monospace"
+SANS = "Segoe UI Variable Text, Segoe UI, Inter, 'SF Pro Text', 'Helvetica Neue', 'Noto Sans', 'DejaVu Sans', sans-serif"
 
 QSS = f"""
 * {{ font-family: {SANS}; font-size: 13px; color: {TEXT}; }}
@@ -85,6 +85,10 @@ QCheckBox {{ spacing: 9px; }}
 QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px; border: 1px solid #3a4456; background: {BG}; }}
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url({CHECK}); }}
 QCheckBox::indicator:hover {{ border-color: {ACCENT}; }}
+
+QProgressBar {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 5px; }}
+QProgressBar::chunk {{ background: {ACCENT}; border-radius: 4px; }}
+QPlainTextEdit {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 9px; padding: 8px 10px; font-family: {MONO}; font-size: 12px; selection-background-color: {ACCENT}; selection-color: #1a1204; }}
 
 QScrollArea {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}

@@ -14,10 +14,16 @@ if "%MODE%"=="" set MODE=onefile
 where py >nul 2>nul
 if %ERRORLEVEL%==0 (set PY=py -3) else (set PY=python)
 
-if not exist .venv\Scripts\python.exe (
-    %PY% -m venv .venv || goto :fail
+rem One private venv per OS: this folder may be shared (Syncthing, OneDrive...) with a Linux/macOS machine that builds
+rem with build_app.sh into its own .venv-<os>-<arch>. A venv from another OS (or a broken one) is recreated.
+set VENV=.venv-win
+if exist %VENV%\Scripts\python.exe (
+    %VENV%\Scripts\python.exe -c "import sys" >nul 2>nul || rmdir /s /q %VENV%
 )
-call .venv\Scripts\activate.bat || goto :fail
+if not exist %VENV%\Scripts\python.exe (
+    %PY% -m venv %VENV% || goto :fail
+)
+call %VENV%\Scripts\activate.bat || goto :fail
 python -m pip install --upgrade pip || goto :fail
 pip install -r requirements-dev.txt || goto :fail
 
@@ -27,6 +33,9 @@ if errorlevel 1 echo WARNING: some tests failed - continuing with the build anyw
 
 set SKU_MODE=%MODE%
 pyinstaller --noconfirm --clean SimbioKernelUtility.spec || goto :fail
+
+echo Smoke-testing the built app...
+python scripts\smoke_test.py || echo WARNING: the smoke test failed - check the output above before using the exe
 
 echo.
 echo Done.  See the dist folder.

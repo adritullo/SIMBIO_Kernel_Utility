@@ -1,5 +1,6 @@
-# PyInstaller spec - used by build_exe.bat.   SKU_MODE=onefile (default) | onedir
+# PyInstaller spec - used by build_exe.bat (Windows), build_app.sh (macOS/Linux) and the GitHub workflow.   SKU_MODE=onefile (default) | onedir
 import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all
@@ -46,10 +47,23 @@ _icu = re.compile(r"^icu[a-z]*\d*\.dll$", re.I)
 a.binaries = [b for b in a.binaries if not _icu.match(os.path.basename(b[0]))]
 
 pyz = PYZ(a.pure)
-icon = "simbio_utility/resources/icon.ico"
 
-if ONEDIR:
+# --- per-platform output -----------------------------------------------------------------------
+#   Windows : dist/SimbioKernelUtility.exe              (onefile, or onedir with SKU_MODE=onedir)
+#   macOS   : dist/SimbioKernelUtility.app              (always onedir inside a .app bundle)
+#   Linux   : dist/SimbioKernelUtility                  (onefile, or onedir)
+RES = "simbio_utility/resources/"
+MAC = sys.platform == "darwin"
+icon = RES + "icon.ico" if sys.platform == "win32" else RES + "icon.icns" if MAC else None  # Linux: icon.png is set at run time
+
+if ONEDIR or MAC:
     exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name=NAME, console=False, icon=icon, upx=False)
     coll = COLLECT(exe, a.binaries, a.datas, name=NAME, upx=False)
+    if MAC:
+        _ver = re.search(r'__version__\s*=\s*"([^"]+)"', Path("simbio_utility/__init__.py").read_text()).group(1)
+        app = BUNDLE(coll, name=NAME + ".app", icon=icon, bundle_identifier="it.inaf.simbiokernelutility",
+                     info_plist={"CFBundleName": "SIMBIO Kernel Utility", "CFBundleDisplayName": "SIMBIO Kernel Utility",
+                                 "CFBundleShortVersionString": _ver, "CFBundleVersion": _ver,
+                                 "NSHighResolutionCapable": True, "LSMinimumSystemVersion": "11.0"})
 else:
     exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name=NAME, console=False, icon=icon, upx=False)

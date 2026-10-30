@@ -1,3 +1,4 @@
 -r requirements.txt
 pytest>=8
 pyinstaller>=6.6
+pyftpdlib>=1.5.9   # local FTP server for the download tests

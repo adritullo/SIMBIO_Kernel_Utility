@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridL
 from ...core import dtm as dtm_mod, hillshade, instruments, timeconv
 from ...core.errors import NoIntercept, UtilityError, spice_message
 from ...core.geometry import GeometryResult, compute as compute_geometry
-from ...resources import EXAMPLE_DTM, resource_path
+from ...resources import default_dtm, dtm_family
 from .. import theme
 from ..widgets import Debouncer, ImageView, Panel, Segmented, Tile, copy_to_clipboard, label
 from .base import Card
@@ -50,6 +50,7 @@ class _HsOut:
 class _HsSignals(QObject):
     done = Signal(int, object)  # job id, _HsOut
     failed = Signal(int, str)
+    latest = 0  # id of the newest job; older queued jobs skip their work (rapid stepping / auto-repeat)
 
 
 class _HsJob(QRunnable):
@@ -64,6 +65,8 @@ class _HsJob(QRunnable):
         self.signals = signals  # shared, long-lived (owned by the card) - never one QObject per job
 
     def run(self) -> None:
+        if self.id != self.signals.latest:
+            return  # superseded while waiting in the queue
         try:
             d = self.cache.get(self.path)
             if d is None:
@@ -175,14 +178,20 @@ class GeometryCard(Card):
         left.body.addWidget(self.chk_hs)
         left.body.addWidget(self.chk_shadow)
         left.body.addWidget(self.chk_scale)
+        self.dtm_label = label("Reference DTM", "muted")
+        left.body.addWidget(self.dtm_label)
         drow = QHBoxLayout()
-        self.dtm_path = QLineEdit(str(self.config.get("dtm_path", "") or resource_path(EXAMPLE_DTM)))
+        self._dtm_family: str | None = None
+        self.dtm_path = QLineEdit()
         self.dtm_path.setProperty("mono", True)
-        self.dtm_path.setToolTip("GeoTIFF used only as generic reference relief (never placed on Mercury)")
+        self.dtm_path.setToolTip("GeoTIFF used only as generic reference relief (never placed on Mercury).\n"
+                                 "Switches automatically with the channel (HRIC / STC+VIHI); edit it to use your own file - "
+                                 "the choice is remembered per family. Clear the field to restore the bundled DTM.")
         bd = QPushButton("…")
         bd.setFixedWidth(40)
         bd.setStyleSheet("padding: 8px 0;")
         bd.clicked.connect(self._browse_dtm)
+        self.dtm_path.editingFinished.connect(self._dtm_edited)
         drow.addWidget(self.dtm_path, 1)
         drow.addWidget(bd)
         left.body.addLayout(drow)
@@ -314,6 +323,31 @@ class GeometryCard(Card):
 
     def _camera_changed(self, *_a) -> None:
         self.cam_name.setText(self.filter.currentData() or "")
+        self._apply_family_dtm()
+
+    def _apply_family_dtm(self) -> None:
+        """Show the reference DTM of the selected channel's family (user override if any, else the bundled one).
+
+        Only the selection changes here; the DTM is used by the next Compute."""
+        fam = dtm_family(self.channel.currentText())
+        if fam == self._dtm_family:
+            return
+        self._dtm_family = fam
+        own = str(self.config.get(f"dtm_path_{fam}", "") or "").strip()
+        self.dtm_path.setText(own or str(default_dtm(fam)))
+        self.dtm_label.setText("Reference DTM · HRIC" if fam == "HRIC" else "Reference DTM · STC / VIHI")
+
+    def _store_dtm(self, path: str) -> None:
+        """Remember a user-chosen DTM for the current family (the bundled one is the implicit default)."""
+        fam = self._dtm_family or dtm_family(self.channel.currentText())
+        path = path.strip()
+        is_default = not path or Path(path) == default_dtm(fam)
+        self.config.set(f"dtm_path_{fam}", "" if is_default else path)
+        if not path:
+            self.dtm_path.setText(str(default_dtm(fam)))
+
+    def _dtm_edited(self) -> None:
+        self._store_dtm(self.dtm_path.text())
 
     def camera(self) -> str:
         return self.filter.currentData() or ""
@@ -446,12 +480,13 @@ class GeometryCard(Card):
         p, _ = QFileDialog.getOpenFileName(self, "Reference DTM", str(Path(self.dtm_path.text()).parent), "GeoTIFF (*.tif *.tiff);;All files (*)")
         if p:
             self.dtm_path.setText(p)
-            self.config.set("dtm_path", p)
+            self._store_dtm(p)
             if self.chk_hs.isChecked() and self.result is not None:
                 self._start_hillshade(self.result)
 
     def _start_hillshade(self, r: GeometryResult) -> None:
         self._job += 1
+        self._hs_signals.latest = self._job
         self.hs_caption.setStyleSheet("")
         self.hs_caption.setText("Rendering…")
         self.config.set("hs_scale", self.chk_scale.isChecked())

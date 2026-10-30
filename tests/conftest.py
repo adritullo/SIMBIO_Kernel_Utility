@@ -1,7 +1,12 @@
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# never let the tests read/write the real user settings (registry on Windows): fresh ini file per test run
+os.environ["SKU_SETTINGS_FILE"] = str(Path(tempfile.mkdtemp(prefix="sku_test_settings_")) / "settings.ini")
 
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))

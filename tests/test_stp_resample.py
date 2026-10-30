@@ -83,7 +83,7 @@ def test_resample_averages_small_features():
 
 
 def test_example_dtm_native_and_fit():
-    d = dtm.load_dtm(Path(__file__).parent.parent / "simbio_utility" / "resources" / "exampleDTM.tif", max_dim=0)
+    d = dtm.load_dtm(Path(__file__).parent.parent / "simbio_utility" / "resources" / "exampleDTM_HRIC.tif", max_dim=0)
     assert d.shape == (1554, 2363) and d.pixel_size_m == pytest.approx(5.0, rel=1e-3)
     z, ps = dtm.fit_max_dim(d.z, d.pixel_size_m, 1400)
     assert max(z.shape) <= 1400 and ps == pytest.approx(10.0, rel=1e-3)

@@ -11,11 +11,12 @@ from ..config import AppConfig
 from ..core.errors import UtilityError
 from ..core.kernels import KernelInfo, KernelSession
 from ..core.stp import StpTable
-from ..resources import resource_path
+from ..resources import example_mk_path, resource_path
 from .cards import CARDS
+from .cards.download_card import DownloadCard
 from .cards.geometry_card import GeometryCard
 from .cards.time_card import TimeCard
-from .widgets import label
+from .widgets import Debouncer, label
 
 
 class _LoadThread(QThread):
@@ -188,7 +189,7 @@ class MainWindow(QMainWindow):
         bl.addWidget(label("METAKERNEL", "h2"))
         self.path = QLineEdit(str(self.cfg.get("metakernel", "")))
         self.path.setProperty("mono", True)
-        self.path.setPlaceholderText(r"F:\BEPICOLOMBO_ops\data\SPICE\BEPICOLOMBO\kernels\mk\bc_nadir_plan_ES.tm   (or drop a .tm file here)")
+        self.path.setPlaceholderText(f"{example_mk_path()}   (or drop a .tm file here)")
         self.path.returnPressed.connect(self.load)
         bl.addWidget(self.path, 1)
         bb = QPushButton("Browse…")
@@ -212,6 +213,14 @@ class MainWindow(QMainWindow):
             if isinstance(c, GeometryCard):
                 self.geo_card = c
         self.time_card.send_to_geometry = self._time_to_geometry
+        for c in self.cards:
+            if isinstance(c, DownloadCard):
+                self.dl_card = c
+        self.dl_card.metakernel_path = lambda: self.path.text()
+        self.dl_card.load_metakernel = self._load_path
+        self._dl_refresh = Debouncer(self.dl_card.refresh, 300)
+        self.path.textChanged.connect(self._dl_refresh)
+        self.dl_card.refresh()
 
         if (g := self.cfg.get("window_geometry", None)) is not None:
             try:
@@ -241,6 +250,10 @@ class MainWindow(QMainWindow):
         self.pill.setToolTip(tip)
         self.pill.style().unpolish(self.pill)
         self.pill.style().polish(self.pill)
+
+    def _load_path(self, path: str) -> None:
+        self.path.setText(path)
+        self.load()
 
     def load(self) -> None:
         p = self.path.text().strip().strip('"')
@@ -294,6 +307,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, e) -> None:  # noqa: N802
         self.cfg.set("window_geometry", self.saveGeometry())
+        for c in self.cards:
+            c.shutdown()
         if self._thread is not None:
             self._thread.wait(3000)
         self.session.unload()

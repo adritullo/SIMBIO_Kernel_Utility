@@ -1,6 +1,7 @@
 """Persistent user settings (QSettings: registry on Windows, ini elsewhere)."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QSettings
@@ -16,7 +17,9 @@ _STP_CACHE: dict[tuple[str, float], StpTable] = {}
 
 class AppConfig:
     def __init__(self) -> None:
-        self._s = QSettings("INAF", "SimbioKernelUtility")
+        # SKU_SETTINGS_FILE redirects settings to an ini file (used by the tests so they never touch the user's registry)
+        ini = os.environ.get("SKU_SETTINGS_FILE")
+        self._s = QSettings(ini, QSettings.IniFormat) if ini else QSettings("INAF", "SimbioKernelUtility")
 
     def get(self, key: str, default=""):
         return self._s.value(key, default)

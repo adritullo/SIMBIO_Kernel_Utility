@@ -5,7 +5,7 @@ import pytest
 
 from simbio_utility.core import dtm, hillshade
 
-EXAMPLE = Path(__file__).parent.parent / "simbio_utility" / "resources" / "exampleDTM.tif"
+EXAMPLE = Path(__file__).parent.parent / "simbio_utility" / "resources" / "exampleDTM_HRIC.tif"
 
 
 def _ramp(az_dir):

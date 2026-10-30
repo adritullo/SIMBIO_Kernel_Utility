@@ -1,0 +1,13 @@
+{
+  "_comment": "Optional. Point Settings > Season definition to a copy of this file. Angles are Mercury true anomaly (deg).",
+  "start_ta_deg": 135.0,
+  "sectors": [
+    { "name": "APH", "from":   0.0, "to":  90.0 },
+    { "name": "D2N", "from":  90.0, "to": 180.0 },
+    { "name": "PER", "from": 180.0, "to": 270.0 },
+    { "name": "N2D", "from": 270.0, "to": 360.0 }
+  ],
+  "epoch_utc": "2027-03-22T08:00:00",
+  "epoch_ta_deg": 180.0,
+  "anomalistic_period_days": 87.9693
+}

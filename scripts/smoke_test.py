@@ -27,5 +27,9 @@ try:
 except subprocess.TimeoutExpired:
     sys.exit("self-test timed out")
 text = out.read_text(encoding="utf-8") if out.exists() else "(no result file written - the app crashed before the self-test)"
+try:  # Windows consoles (cp1252) cannot print characters like the arrow in the EVF summary
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 print(text)
 sys.exit(0 if r.returncode == 0 and "SELFTEST OK" in text else 1)

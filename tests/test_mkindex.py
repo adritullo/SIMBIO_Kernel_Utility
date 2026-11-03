@@ -53,9 +53,9 @@ def http_dir(tmp_path):
     root = tmp_path / "www"
     mk = root / "data/SPICE/BEPICOLOMBO/kernels/mk"
     mk.mkdir(parents=True)
-    (mk / "bc_ops.tm").write_text("ops\n")
-    (mk / "bc_plan.tm").write_text("plan\n" * 50_000)
-    (mk / "bc_ops_v433_20260902_001.tm").write_text("old\n")
+    (mk / "bc_ops.tm").write_bytes(b"ops\n")  # bytes: write_text would turn \n into \r\n on Windows and change the sizes
+    (mk / "bc_plan.tm").write_bytes(b"plan\n" * 50_000)
+    (mk / "bc_ops_v433_20260902_001.tm").write_bytes(b"old\n")
     (mk / "notes.txt").write_text("x")
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
     handler.log_message = lambda *a, **k: None
@@ -74,7 +74,7 @@ def test_list_and_fetch_over_http(http_dir, tmp_path):
     assert p == tmp_path / "dl" / "bc_plan.tm" and p.stat().st_size == 250_000
     assert seen and seen[-1][0] == 250_000 and not list((tmp_path / "dl").glob("*.part"))
     p2 = mi.fetch(items[0], tmp_path / "dl")  # overwrite-safe
-    assert p2.read_text() == "ops\n"
+    assert p2.read_bytes() == b"ops\n"
 
 
 def test_fetch_cancel_and_errors(http_dir, tmp_path):
@@ -100,8 +100,8 @@ def test_list_and_fetch_over_ftp(tmp_path):
     served = tmp_path / "ftp"
     mk = served / "data/SPICE/BEPICOLOMBO/kernels/mk"
     mk.mkdir(parents=True)
-    (mk / "bc_ops.tm").write_text("ops via ftp\n")
-    (mk / "bc_plan_v1_20260101_001.tm").write_text("v\n")
+    (mk / "bc_ops.tm").write_bytes(b"ops via ftp\n")
+    (mk / "bc_plan_v1_20260101_001.tm").write_bytes(b"v\n")
     (mk / "other.txt").write_text("x")
     auth = DummyAuthorizer()
     auth.add_anonymous(str(served))
@@ -111,8 +111,8 @@ def test_list_and_fetch_over_ftp(tmp_path):
         url = f"ftp://127.0.0.1:{srv.address[1]}/data/SPICE/BEPICOLOMBO/kernels/mk/"
         items, method = mi.list_metakernels(url)
         assert method == "ftp" and [m.name for m in items] == ["bc_ops.tm", "bc_plan_v1_20260101_001.tm"]
-        assert items[0].size == len("ops via ftp\n") and len(items[0].modified) == 16
+        assert items[0].size == len(b"ops via ftp\n") and len(items[0].modified) == 16
         p = mi.fetch(items[0], tmp_path / "out")
-        assert p.read_text() == "ops via ftp\n"
+        assert p.read_bytes() == b"ops via ftp\n"
     finally:
         srv.close_all()

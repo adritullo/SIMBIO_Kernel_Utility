@@ -4,6 +4,16 @@ Standalone desktop tool (Python · SpiceyPy · NumPy · PySide6) that turns a Be
 about mission time and SIMBIO-SYS observation geometry. One metakernel is loaded once (top bar, or drag & drop a `.tm`)
 and feeds every card.
 
+## Quickstart
+(If you already have kernel downloaded just *jump directly to step 3*)
+
+1. The tool work around metakernels to define which kernel file take in consideration. If you don't have your version you can search and download the official one using the Search Kernel card. The default url ("https://spiftp.esac.esa.int/data/SPICE/BEPICOLOMBO/kernels/mk/") will give you the official one automatically update by ESA. Press __Search__ to have the list of mk available at the moment, select the desired one and press "Download and use as metakernel" (or just "Dowload selected" if you don't intend to use it).
+2. In the card "Kernel Download" select the destination folder you want to use and then ___Download kernels___. When finished the downloaded metakernel will be automatically addressed. You are ready to go (*jump to step 4*).
+3. Browse the metakernel you want to use with ___Browse___ then ___Load___. The number of correct kernel file loaded will be show in the up-right corner in green.
+4. The tools of the suite can be addressed directly from the list on the left part. 
+5. The Time Converter permits to translate time in the UTC and Epoch format. Just write or paste the original in the correct form.
+6. Observation Geometry permits to calculate the main information regarding the capacity of observation of the selected camera at the moment decided. A simple hillshade rendered in the lower part simulate the illumination condition and the And the ability to observe surface features as a function of resolution (roughly approximate). The arrows around the date permit respectively to jump 1 s, 1 m and 1 h backward or forward in time.
+
 ## Cards
 
 | Card | What it does |
@@ -95,34 +105,3 @@ Two reference DTMs are bundled: `exampleDTM_HRIC.tif` (5 m/px) and `exampleDTM_S
 placed on Mercury, and the picture says so. Lambertian shading uses the computed solar azimuth and incidence (`n·s`), with optional
 approximate cast shadows (horizon sampling towards the Sun). Night side (incidence ≥ 90°) renders black. Pick another GeoTIFF with the `…` button.
 Compressed GeoTIFFs other than none/DEFLATE need `pip install imagecodecs` (not bundled, to keep the exe small).
-
-## Code layout
-
-```
-run.py                         entry point
-simbio_utility/
-  core/                        no GUI imports - reusable from scripts / notebooks
-    kernels.py                 KernelSession: furnsh with relative PATH_VALUES, kernel summary
-    timeconv.py                UTC <-> ET
-    instruments.py             camera discovery from the pool, optics table
-    geometry.py                compute(camera, et, settings) -> GeometryResult
-    seasons.py                 MTA -> season label + year counter (pure python)
-    dtm.py, hillshade.py       reference terrain + illumination
-    download.py                metakernel parser/rewriter + FTP downloader (ftplib, no Qt)
-    stp.py                     EVF -> MTP/STP lookup
-  gui/
-    main_window.py             sidebar, metakernel bar, loading thread, settings
-    theme.py, widgets.py       dark theme (QSS), tiles, pan/zoom image view with compass + scale bar
-    cards/                     one file per function; register in cards/__init__.py -> CARDS
-tests/                         pytest; make_mock_kernels.py builds a synthetic MPO/Mercury kernel set
-```
-
-### Adding a card
-1. `gui/cards/my_card.py`: subclass `Card` (`title`, `glyph`, `build(root)`, optional `kernels_changed()`).
-2. Put the maths in `core/` (plain functions, spiceypy + numpy).
-3. Append the class to `CARDS` in `gui/cards/__init__.py` — it appears in the sidebar automatically.
-
-## Tests
-`python -m pytest tests` — tests never touch your real settings (they use a temporary ini via `SKU_SETTINGS_FILE`); the download tests run a local FTP server (`pyftpdlib`, in requirements-dev). A synthetic kernel set (circular 400 km orbit, tilted cameras) is compared with analytic
-sphere geometry (emission, slant range, resolution, speed), an independent incidence/azimuth formulation, the season table
-and the hillshade maths.

@@ -90,7 +90,8 @@ class TimeCard(Card):
         self._da, self._db = Debouncer(self._update_a), Debouncer(self._update_b)
         self.a.inp.textChanged.connect(self._da)
         self.b.inp.textChanged.connect(self._db)
-        self.prec.currentIndexChanged.connect(lambda *_: self._update_b())
+        self._mirroring = False  # a value written into the other column must not be mirrored back
+        self.prec.currentIndexChanged.connect(lambda *_: self._update_b(mirror=False))
         self.a.use_et.connect(self._forward)
         self.b.use_et.connect(self._forward)
         self.send_to_geometry = lambda et: None  # wired by the main window
@@ -101,21 +102,41 @@ class TimeCard(Card):
     def _now(self) -> None:
         self.a.inp.setText(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3])
 
+    def _mirror_into(self, conv: _Converter, text: str, update) -> None:
+        """Write ``text`` into the *other* column's input (without re-triggering it) and refresh that column."""
+        self._mirroring = True
+        try:
+            conv.inp.blockSignals(True)
+            conv.inp.setText(text)
+            conv.inp.blockSignals(False)
+            update()
+        finally:
+            self._mirroring = False
+
     def _update_a(self) -> None:
         text = self.a.inp.text().strip()
         if not text:
             self.a.show_error("")
+            if not self._mirroring:
+                self._mirror_into(self.b, "", lambda: self._update_b(mirror=False))
             return
         try:
             et = timeconv.utc_to_et(text)
             self.a.show_ok(et, [f"{et:.6f}", timeconv.et_to_utc(et, 6), timeconv.et_to_utc_doy(et, 6), timeconv.et_to_tdb(et, 6)])
         except UtilityError as exc:
             self.a.show_error(str(exc))
+            if not self._mirroring:
+                self._mirror_into(self.b, "", lambda: self._update_b(mirror=False))
+            return
+        if not self._mirroring:  # UTC typed on the left -> the same instant as ET on the right
+            self._mirror_into(self.b, f"{et:.6f}", lambda: self._update_b(mirror=False))
 
-    def _update_b(self) -> None:
+    def _update_b(self, mirror: bool = True) -> None:
         text = self.b.inp.text().strip().replace(",", ".")
         if not text:
             self.b.show_error("")
+            if mirror and not self._mirroring:
+                self._mirror_into(self.a, "", lambda: self._update_a())
             return
         p = self.prec.currentData()
         try:
@@ -123,12 +144,19 @@ class TimeCard(Card):
             self.b.show_ok(et, [timeconv.et_to_utc(et, p), timeconv.et_to_utc_doy(et, p), timeconv.et_to_tdb(et, p)])
         except ValueError:
             self.b.show_error(f"'{text}' is not a number (ET is seconds past J2000 TDB).")
+            if mirror and not self._mirroring:
+                self._mirror_into(self.a, "", lambda: self._update_a())
+            return
         except Exception as exc:  # SPICE: out of LSK range etc.
             self.b.show_error(f"Cannot convert: {spice_message(exc)}")
+            if mirror and not self._mirroring:
+                self._mirror_into(self.a, "", lambda: self._update_a())
+            return
+        if mirror and not self._mirroring:  # ET typed on the right -> the same instant as UTC on the left
+            self._mirror_into(self.a, timeconv.et_to_utc(et, p), lambda: self._update_a())
 
     def set_et(self, et: float) -> None:
         self.b.inp.setText(f"{et:.6f}")
 
     def kernels_changed(self) -> None:
-        self._update_a()
-        self._update_b()
+        self._update_a()  # also refreshes the right column

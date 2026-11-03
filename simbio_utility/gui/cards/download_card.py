@@ -73,6 +73,9 @@ class DownloadCard(Card):
         left.body.addWidget(self.mk_label)
         self.mk_info = label("", "small", wrap=True)
         left.body.addWidget(self.mk_info)
+        self.banner = label("", "warn", wrap=True)
+        self.banner.hide()
+        left.body.addWidget(self.banner)
 
         left.body.addSpacing(6)
         left.body.addWidget(label("Server host name", "muted"))
@@ -168,6 +171,12 @@ class DownloadCard(Card):
         self.btn_open.clicked.connect(self._open_folder)
         self.refresh()
 
+    def kernels_changed(self) -> None:
+        if self.status.text().startswith("Download complete - loading"):
+            self.status.setText("Download complete - metakernel loaded")
+            self._log("metakernel loaded")
+        self.refresh()
+
     # ------------------------------------------------------------------ inputs
     def _host_edited(self) -> None:
         if not self.host.text().strip():
@@ -184,6 +193,21 @@ class DownloadCard(Card):
         if p:
             self.out.setText(p)
             self.config.set("dl_out_dir", p)
+
+    def offer(self, mk: dl.Metakernel, missing: list[str]) -> None:
+        """Called by the main window when a metakernel was chosen whose kernels are not (all) on this computer."""
+        inferred = dl.infer_out_dir(mk.path, self.remote.text().strip() or dl.DEFAULT_REMOTE_ROOT)
+        if inferred is not None:  # the metakernel already sits in <out>/<remote path>/mk -> download right there
+            self.out.setText(str(inferred))
+        n_listed = len(mk.entries) + len(mk.skipped)
+        txt = f"{mk.path.name}: {len(missing)} of {n_listed} kernels are not on this computer."
+        txt += (" The output folder was set from the metakernel's location." if inferred is not None
+                else " Choose the output folder, then press Download kernels.")
+        if any(k in mk.skipped for k in missing):
+            txt += " (Entries given with a plain path cannot be downloaded.)"
+        self.banner.setText(txt)
+        self.banner.show()
+        self.refresh()
 
     def refresh(self) -> None:
         """Re-read the metakernel from the top bar and update the summary (cheap; called on every relevant change)."""
@@ -242,6 +266,7 @@ class DownloadCard(Card):
             return
         self.config.set("dl_out_dir", self.out.text().strip())
         self._plan, self._new_mk = plan, None
+        self.banner.hide()
         self.log.clear()
         self.bar.setValue(0)
         self.btn_load.setEnabled(False)
@@ -316,6 +341,10 @@ class DownloadCard(Card):
             self._new_mk = rep.metakernel
             self._log(f"metakernel written: {rep.metakernel}")
             self.btn_load.setEnabled(True)
+            if rep.ok:  # everything is on disk: point the app at the new metakernel and load it
+                self.status.setText("Download complete - loading the metakernel…")
+                self._log("loading the new metakernel…")
+                self.load_metakernel(str(rep.metakernel))
         if self._plan:
             self.btn_open.setEnabled(True)
 

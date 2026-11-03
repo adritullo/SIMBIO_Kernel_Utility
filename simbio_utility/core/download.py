@@ -145,6 +145,29 @@ class Metakernel:
     skipped: list[str] = field(default_factory=list)  # entries that cannot be mapped to a server path
     path_values_span: tuple[int, int] | None = None
 
+    def local_path(self, listed: str) -> Path:
+        """Where SPICE will look for a KERNELS_TO_LOAD item: ``$SYMBOL`` -> its PATH_VALUES entry (relative values are
+        resolved against the metakernel folder, as KernelSession does), plain items are used as written."""
+        item = listed.strip()
+        m = re.match(r"\$([A-Za-z0-9_]+)[/\\]+(.+)$", item)
+        base = self.path.parent
+        if m:
+            names = [x.upper() for x in self.symbols]
+            i = names.index(m.group(1).upper()) if m.group(1).upper() in names else 0
+            val = Path(self.values[i]).expanduser() if i < len(self.values) else Path(".")
+            base = val if val.is_absolute() else self.path.parent / val
+            item = m.group(2)
+        p = Path(item).expanduser()
+        return p if p.is_absolute() else base / item
+
+    def missing(self) -> list[str]:
+        """Items of KERNELS_TO_LOAD that are not on disk."""
+        return [k for k in [e.listed for e in self.entries] + self.skipped if not self.local_path(k).is_file()]
+
+    @property
+    def total(self) -> int:
+        return len(self.entries) + len(self.skipped)
+
     def counts_by_folder(self) -> dict[str, int]:
         out: dict[str, int] = {}
         for e in self.entries:
@@ -240,6 +263,16 @@ def make_plan(metakernel: str | Path, out_dir: str | Path, remote_root: str = DE
     if not root:
         raise UtilityError("The remote kernels path is empty.")
     return DownloadPlan(parse_metakernel(metakernel), out, root)
+
+
+def infer_out_dir(metakernel: str | Path, remote_root: str = DEFAULT_REMOTE_ROOT) -> Path | None:
+    """If the metakernel sits in ``<out>/<remote_root>/mk/`` (the layout this app and ESA use), return ``<out>``."""
+    parts = Path(str(metakernel)).expanduser().parent.parts
+    root = remote_root.strip("/").split("/")
+    n = len(root)
+    if len(parts) > n + 1 and parts[-1].lower() == "mk" and [x.lower() for x in parts[-n - 1:-1]] == [x.lower() for x in root]:
+        return Path(*parts[:-n - 1])
+    return None
 
 
 def split_host(text: str) -> tuple[str, int]:

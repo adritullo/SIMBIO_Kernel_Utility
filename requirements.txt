@@ -2,3 +2,4 @@ spiceypy>=6.0.0
 numpy>=1.26
 tifffile>=2023.7.10
 PySide6-Essentials>=6.6
+certifi

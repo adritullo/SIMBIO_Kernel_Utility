@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QDialogButtonBo
 
 from .. import APP_NAME, AUTHOR, __version__
 from ..config import AppConfig
+from ..core import download as dl
 from ..core.errors import UtilityError
 from ..core.kernels import KernelInfo, KernelSession
 from ..core.stp import StpTable
@@ -15,6 +16,7 @@ from ..resources import example_mk_path, resource_path
 from .cards import CARDS
 from .cards.download_card import DownloadCard
 from .cards.geometry_card import GeometryCard
+from .cards.search_card import SearchCard
 from .cards.time_card import TimeCard
 from .widgets import Debouncer, label
 
@@ -217,7 +219,11 @@ class MainWindow(QMainWindow):
             if isinstance(c, DownloadCard):
                 self.dl_card = c
         self.dl_card.metakernel_path = lambda: self.path.text()
-        self.dl_card.load_metakernel = self._load_path
+        self.dl_card.load_metakernel = lambda p: self._load_path(p, check=False)  # just downloaded: load straight away
+        for c in self.cards:
+            if isinstance(c, SearchCard):
+                self.sk_card = c
+        self.sk_card.use_metakernel = self._load_path  # checked: if its kernels are missing we go to Kernel Download
         self._dl_refresh = Debouncer(self.dl_card.refresh, 300)
         self.path.textChanged.connect(self._dl_refresh)
         self.dl_card.refresh()
@@ -251,13 +257,34 @@ class MainWindow(QMainWindow):
         self.pill.style().unpolish(self.pill)
         self.pill.style().polish(self.pill)
 
-    def _load_path(self, path: str) -> None:
-        self.path.setText(path)
-        self.load()
+    def goto_card(self, card) -> None:
+        idx = self.cards.index(card)
+        self.nav_group.button(idx).setChecked(True)
+        self.stack.setCurrentIndex(idx)
 
-    def load(self) -> None:
+    def _load_path(self, path: str, check: bool = True) -> None:
+        self.path.setText(path)
+        self.load(check=check)
+
+    def _offer_download(self, p: str) -> bool:
+        """If the metakernel lists kernels that are not on disk, go to Kernel Download instead of failing to load."""
+        try:
+            mk = dl.parse_metakernel(p)
+        except UtilityError:
+            return False  # not parseable here: let the normal load report the real problem
+        missing = mk.missing()
+        if not missing:
+            return False
+        self._set_pill("err", f"{len(missing)} kernels missing", f"{mk.path.name}: {len(missing)} of {mk.total} kernels are not on this computer")
+        self.dl_card.offer(mk, missing)
+        self.goto_card(self.dl_card)
+        return True
+
+    def load(self, check: bool = True) -> None:
         p = self.path.text().strip().strip('"')
         if not p or self._thread is not None:
+            return
+        if check and self._offer_download(p):
             return
         self.btn_load.setEnabled(False)
         self.path.setEnabled(False)

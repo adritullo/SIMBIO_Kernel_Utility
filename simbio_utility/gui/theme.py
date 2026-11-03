@@ -48,6 +48,7 @@ QLabel[role="valuebig"] {{ font-family: {MONO}; font-size: 17px; font-weight: 60
 QLabel[role="mono"] {{ font-family: {MONO}; }}
 QLabel[role="unit"] {{ color: {MUTED}; font-size: 12px; }}
 QLabel[role="error"] {{ color: {DANGER}; }}
+QLabel[role="warn"] {{ color: {ACCENT_HI}; }}
 QLabel[role="note"] {{ color: {MUTED}; font-size: 11px; }}
 
 QLabel[pill="idle"] {{ background: {SURFACE_2}; color: {MUTED}; border: 1px solid {BORDER}; border-radius: 11px; padding: 3px 12px; }}
@@ -86,6 +87,11 @@ QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 5px; border: 1
 QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; image: url({CHECK}); }}
 QCheckBox::indicator:hover {{ border-color: {ACCENT}; }}
 
+QTableWidget {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 9px; outline: none; font-family: {MONO}; font-size: 12px;
+    selection-background-color: rgba(242,169,59,0.25); selection-color: {TEXT}; }}
+QTableWidget::item {{ padding: 5px 8px; border: none; }}
+QTableWidget::item:selected {{ background: rgba(242,169,59,0.22); color: {TEXT}; }}
+QHeaderView::section {{ background: {SURFACE_2}; color: {MUTED}; border: none; border-bottom: 1px solid {BORDER}; padding: 7px 8px; font-weight: 600; }}
 QProgressBar {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 5px; }}
 QProgressBar::chunk {{ background: {ACCENT}; border-radius: 4px; }}
 QPlainTextEdit {{ background: {BG}; border: 1px solid {BORDER}; border-radius: 9px; padding: 8px 10px; font-family: {MONO}; font-size: 12px; selection-background-color: {ACCENT}; selection-color: #1a1204; }}

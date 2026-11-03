@@ -105,6 +105,8 @@ def _selftest(outfile: str) -> int:
     try:
         import spiceypy as sp
         lines.append(f"CSPICE {sp.tkvrsn('TOOLKIT')}")
+        import certifi  # CA list for the https listing of the Search Kernel card
+        assert Path(certifi.where()).is_file(), "certifi CA bundle missing"
         from PySide6.QtWidgets import QApplication
         from simbio_utility import __version__
         from simbio_utility.config import AppConfig

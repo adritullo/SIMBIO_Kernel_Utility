@@ -21,13 +21,13 @@ jobs:
       matrix:
         include:
           - {name: windows-x64,  os: windows-latest}
-          - {name: macos-arm64,  os: macos-14}
+          - {name: macos-arm64,  os: macos-15}      # macos-14 was retired by GitHub on 2026-11-02
           - {name: macos-x64,    os: macos-15-intel}   # Intel Macs; if GitHub renames the label, pick another x86_64 macOS runner
           - {name: linux-x64,    os: ubuntu-22.04}     # oldest glibc we build on => runs on newer distros too
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -67,7 +67,7 @@ jobs:
           v=$(python -c "import simbio_utility; print(simbio_utility.__version__)")
           cd dist && tar -czf "SimbioKernelUtility-$v-${{ matrix.name }}.tar.gz" SimbioKernelUtility
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: SimbioKernelUtility-${{ matrix.name }}
           path: |
@@ -80,11 +80,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: assets/*
           generate_release_notes: true

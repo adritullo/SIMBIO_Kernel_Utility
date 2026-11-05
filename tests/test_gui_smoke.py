@@ -148,8 +148,9 @@ def test_mission_plan_tile_and_scaled_hillshade(win):
 
 def test_version_label(win):
     from PySide6.QtWidgets import QLabel
+    import simbio_utility
     w, _ = win
-    assert any(l.text() == "v0.3.0 by a.tullo" for l in w.findChildren(QLabel))
+    assert any(l.text() == f"v{simbio_utility.__version__} by a.tullo" for l in w.findChildren(QLabel))
 
 
 def test_dtm_follows_channel(win):

@@ -1,26 +1,15 @@
 # SIMBIO Kernel Utility
 
-Standalone desktop tool, based on open-source resources (Python, SpiceyPy, NumPy and PySide6) that interrogate BepiColombo **kernel** into quick answers
-about mission time and SIMBIO-SYS observation geometry. The metakernel is loaded once (top bar, or drag & drop a `.tm`)
-and feeds every windos tool (here referred as "cards").
-
-## Quickstart
-0. Download the standalone release you need from the ___Release___ section on the right of the page (and unzip it).  
-
-(If you already have kernel downloaded just *jump directly to step 3*)
-1. The tool work around metakernels to define which kernel file take in consideration. If you don't have your version you can search and download the official one using the Search Kernel card. The default url ("https://spiftp.esac.esa.int/data/SPICE/BEPICOLOMBO/kernels/mk/") will give you the official one automatically update by ESA. Press __Search__ to have the list of mk available at the moment, select the desired one and press "Download and use as metakernel" (or just "Dowload selected" if you don't intend to use it).
-2. In the card "Kernel Download" select the destination folder you want to use and then ___Download kernels___. When finished the downloaded metakernel will be automatically addressed. You are ready to go (*jump to step 4*).
-3. Browse the metakernel you want to use with ___Browse___ then ___Load___. The number of correct kernel file loaded will be show in the up-right corner in green.
-4. The tools of the suite can be addressed directly from the list on the left part. 
-5. The Time Converter permits to translate time in the UTC and Epoch format. Just write or paste the original in the correct form.
-6. Observation Geometry permits to calculate the main information regarding the capacity of observation of the selected camera at the moment decided. A simple hillshade rendered in the lower part simulate the illumination condition and the And the ability to observe surface features as a function of resolution (roughly approximate). The arrows around the date permit respectively to jump 1 s, 1 m and 1 h backward or forward in time.
+Standalone desktop tool (Python · SpiceyPy · NumPy · PySide6) that turns a BepiColombo **metakernel** into quick answers
+about mission time and SIMBIO-SYS observation geometry. One metakernel is loaded once (top bar, or drag & drop a `.tm`)
+and feeds every card.
 
 ## Cards
 
 | Card | What it does |
 |---|---|
 | **Time Converter** | UTC → ET (TDB s past J2000) and ET → UTC (ISO / day-of-year / TDB calendar, 0–6 decimals). Accepts ISO, `2027 APR 06 07:48:34`, `2027-096T…`, `2027-05-18 T02:10:30`. The two columns are **mirrored**: typing UTC on the left fills the ET on the right and vice versa (each with its own conversions); clearing or an invalid entry empties the other side. One click sends the epoch to the Geometry card. |
-| **Observation Geometry** | Pick **Channel** (STC-H, STC-L, HRIC, VIHI…) and **Filter** (P700, F420, F550, FPAN…) — both lists are discovered from the loaded IK — plus an epoch (UTC or ET). Returns season (`APH1`, `D2N1`, …), MTA, ground resolution, flight altitude, orbital velocity, central-pixel lat/lon, sub-spacecraft lat/lon, solar incidence/azimuth, phase, emission (+ slant range). Optional **illustrative hillshade** flag. The epoch has **««« « ‹ › » »»»** buttons (∓1 s, ∓1 min, ∓1 h; hold to repeat; they recompute immediately) and the header shows the mission plan (**MTP n · STP m**). Tiles copy on click; *Copy all* / *Export…* (CSV, JSON). |
+| **Observation Geometry** | Pick **Channel** (STC-H, STC-L, HRIC, VIHI…) and **Filter** (P700, F420, F550, FPAN…) — both lists are discovered from the loaded IK; the whole-focal-plane `STC` entry is not offered, only STC-H and STC-L — plus an epoch (UTC or ET). Returns season (`APH1`, `D2N1`, …), MTA, ground resolution, flight altitude, orbital velocity, central-pixel lat/lon, sub-spacecraft lat/lon, solar incidence/azimuth, phase, emission (+ slant range). Optional **illustrative hillshade** flag. The epoch has **««« « ‹ › » »»»** buttons (∓1 s, ∓1 min, ∓1 h; hold to repeat; they recompute immediately) and the header shows the mission plan (**MTP n · STP m**). Tiles copy on click; *Copy all* / *Export…* (CSV, JSON). |
 | **Search Kernel** | Lists every `*.tm` published in a server folder — default `https://spiftp.esac.esa.int/data/SPICE/BEPICOLOMBO/kernels/mk/` (editable; clear it to restore the default; http(s) and `ftp://` work, and an https listing that fails falls back to FTP on the same host/path). Shows type (latest operational / latest planning / versioned `vXXX · date #NNN`), modified date and size, with a text filter and a short description of `bc_ops.tm`, `bc_plan.tm` and `*_vXXX_YYYYMMDD_NNN.tm`. **Download selected** saves the chosen files (default folder `<output>/data/SPICE/BEPICOLOMBO/kernels/mk`); **Download and use as metakernel** (or double-click) saves one, puts it in the metakernel bar and loads it — if its kernels are not on the computer you land in *Kernel Download*. |
 | **Kernel Download** | Downloads every kernel listed in the metakernel (top bar) from an anonymous FTP server — default `spiftp.esac.esa.int`, editable (also `host:port`; clear it to restore the default; **Test** checks the connection). Output folder + *Remote kernels path* (default `data/SPICE/BEPICOLOMBO/kernels`) reproduce the ESA tree under the output folder, and a copy of the metakernel with `PATH_VALUES` pointing to it is written to `…/kernels/mk/`. Works **without kernels being loaded** (they are not there yet). Existing files with the same size are skipped (*Re-download…* forces them), files are written as `.part` and renamed when complete, network errors are retried with a reconnect, one missing file does not stop the others, **Cancel** is immediate and leaves no partial files. A metakernel whose kernels are not (all) on disk is detected right after *Browse…* / *Load* / drag-and-drop and sends you to this card, with the output folder pre-filled when the metakernel already sits in `<out>/data/SPICE/BEPICOLOMBO/kernels/mk/`. When every file is on disk the new metakernel is put in the metakernel bar and **loaded automatically** (after errors the *Load the downloaded metakernel* button stays available). |
 
@@ -54,10 +43,12 @@ PyInstaller cannot cross-compile: build on the OS you target.
 | Windows | `build_exe.bat` | `dist\SimbioKernelUtility.exe` |
 | macOS | `bash build_app.sh` (Terminal, on a Mac) | `dist/SimbioKernelUtility.app` + `SimbioKernelUtility-<ver>-macos-<arch>.zip` |
 | Linux | `bash build_app.sh [onedir]` (also works in WSL on Windows) | `dist/SimbioKernelUtility` + `…-linux-<arch>.tar.gz` |
-| **All four at once** | push the repo to GitHub; `github_workflow_build.yml` (move it to `.github/workflows/build.yml`) builds Windows x64, macOS Apple Silicon, macOS Intel and Linux x64, runs the tests and the smoke test on each, and attaches the downloads to the run. Push a tag (`git tag v0.3.0 && git push --tags`) to also publish a GitHub Release. | 4 downloads |
+| **All four at once** | push the repo to GitHub; `github_workflow_build.yml` (move it to `.github/workflows/build.yml`) builds Windows x64, macOS Apple Silicon, macOS Intel and Linux x64, runs the tests and the smoke test on each, and attaches the downloads to the run. Push a tag (`git tag v0.6.2 && git push origin v0.6.2`) to also publish a GitHub Release. | 4 downloads |
 
 Each OS keeps its own build environment (`.venv-win`, `.venv-linux-x86_64`, `.venv-macos-arm64`…), so the project folder can be shared
 between machines (Syncthing, OneDrive…) without one OS breaking the other's virtual environment. The old shared `.venv` is no longer used and can be deleted.
+
+**Versioning.** The version is taken from the tag: the workflow runs `scripts/set_version.py <tag>` before building, so the sidebar label, the macOS bundle version and the download names (`SimbioKernelUtility-<version>-<platform>`) all follow it. Use plain tags (`v0.6.2`); a stray dot (`v.0.6.2`) is tolerated and a warning is printed. A run started by hand with `release_tag` does the same. For local builds the version is the one in `simbio_utility/__init__.py` (keep it roughly in step with the last release).
 
 Every build ends with `scripts/smoke_test.py`, which starts the **built** app in self-test mode (`SimbioKernelUtility --selftest out.txt`):
 a window is created off-screen, CSPICE is loaded and every bundled resource (icon, both DTMs, EVF) is read. It prints `SELFTEST OK` or the traceback.
@@ -106,3 +97,34 @@ Two reference DTMs are bundled: `exampleDTM_HRIC.tif` (5 m/px) and `exampleDTM_S
 placed on Mercury, and the picture says so. Lambertian shading uses the computed solar azimuth and incidence (`n·s`), with optional
 approximate cast shadows (horizon sampling towards the Sun). Night side (incidence ≥ 90°) renders black. Pick another GeoTIFF with the `…` button.
 Compressed GeoTIFFs other than none/DEFLATE need `pip install imagecodecs` (not bundled, to keep the exe small).
+
+## Code layout
+
+```
+run.py                         entry point
+simbio_utility/
+  core/                        no GUI imports - reusable from scripts / notebooks
+    kernels.py                 KernelSession: furnsh with relative PATH_VALUES, kernel summary
+    timeconv.py                UTC <-> ET
+    instruments.py             camera discovery from the pool, optics table
+    geometry.py                compute(camera, et, settings) -> GeometryResult
+    seasons.py                 MTA -> season label + year counter (pure python)
+    dtm.py, hillshade.py       reference terrain + illumination
+    download.py                metakernel parser/rewriter + FTP downloader (ftplib, no Qt)
+    stp.py                     EVF -> MTP/STP lookup
+  gui/
+    main_window.py             sidebar, metakernel bar, loading thread, settings
+    theme.py, widgets.py       dark theme (QSS), tiles, pan/zoom image view with compass + scale bar
+    cards/                     one file per function; register in cards/__init__.py -> CARDS
+tests/                         pytest; make_mock_kernels.py builds a synthetic MPO/Mercury kernel set
+```
+
+### Adding a card
+1. `gui/cards/my_card.py`: subclass `Card` (`title`, `glyph`, `build(root)`, optional `kernels_changed()`).
+2. Put the maths in `core/` (plain functions, spiceypy + numpy).
+3. Append the class to `CARDS` in `gui/cards/__init__.py` — it appears in the sidebar automatically.
+
+## Tests
+`python -m pytest tests` — tests never touch your real settings (they use a temporary ini via `SKU_SETTINGS_FILE`); the download tests run a local FTP server (`pyftpdlib`, in requirements-dev). A synthetic kernel set (circular 400 km orbit, tilted cameras) is compared with analytic
+sphere geometry (emission, slant range, resolution, speed), an independent incidence/azimuth formulation, the season table
+and the hillshade maths.

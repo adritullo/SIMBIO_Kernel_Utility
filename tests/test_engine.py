@@ -39,6 +39,13 @@ def test_camera_discovery(session):
     assert cams[HRIC].channel == "HRIC" and cams[HRIC].filter == "FPAN"
 
 
+def test_whole_stc_not_listed(monkeypatch):
+    names = ["MPO_SIMBIO-SYS_STC_FPA", "MPO_SIMBIO-SYS_STC-FPA_FPA", "MPO_SIMBIO-SYS_STC_P700", "MPO_SIMBIO-SYS_STC-H_P700", "MPO_SIMBIO-SYS_STC-L_P700", "MPO_SIMBIO-SYS_HRIC_FPAN"]
+    monkeypatch.setattr(instruments, "_pool_camera_names", lambda: names)
+    cams = instruments.discover_cameras()
+    assert [c.channel for c in cams] == ["HRIC", "STC-H", "STC-L"]
+
+
 def test_nadir_camera_matches_analytic_orbit(session):
     et = ET("2027-06-20T12:00:00")
     g = geometry.compute(HRIC, et)

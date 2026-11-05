@@ -100,12 +100,22 @@ def _pool_camera_names() -> list[str]:
     return names
 
 
+def is_whole_stc(channel: str) -> bool:
+    """Any STC entry other than the STC-H / STC-L channels (i.e. the whole focal plane, 'STC', 'STC-FPA'...):
+    not used for science, so it is not offered."""
+    c = channel.strip().upper()
+    return c.startswith("STC") and c not in ("STC-H", "STC-L")
+
+
 def discover_cameras() -> list[Camera]:
-    """SIMBIO-SYS cameras found in the pool, falling back to the known list (marked unavailable)."""
+    """SIMBIO-SYS cameras found in the pool, falling back to the known list (marked unavailable).
+
+    The generic whole-focal-plane 'STC' camera is left out: only the STC-H and STC-L channels are listed."""
     found = sorted({n for n in _pool_camera_names() if n.startswith(PREFIX)})
     if not found:
         found = sorted({n for n in _pool_camera_names()})
     cams = [Camera(n, *split_name(n), available=True) for n in found]
+    cams = [c for c in cams if not is_whole_stc(c.channel)]
     if not cams:
         cams = [Camera(n, *split_name(n), available=False) for n in FALLBACK_CAMERAS]
     return sorted(cams, key=lambda c: (c.channel, c.filter))

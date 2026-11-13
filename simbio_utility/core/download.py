@@ -1,6 +1,8 @@
 """Download the kernels listed in a (BepiColombo) metakernel from an ESA SPICE FTP server.
 
-Pure python (ftplib) - no Qt, no SPICE - so it can run in a worker thread and be unit-tested against a local FTP server.
+Pure python (ftplib / urllib) - no Qt, no SPICE - so it can run in a worker thread and be unit-tested against local servers.
+Transport: anonymous FTP (port 21, default) or, with ``https=True``, the same paths over HTTPS (port 443) for networks that
+block FTP.
 
 Layout (same as the original ``KernelDownload_custom.py``)::
 
@@ -14,10 +16,15 @@ from __future__ import annotations
 import ftplib
 import os
 import re
+import ssl
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
+
+from urllib.parse import quote
 
 from .errors import UtilityError
 
@@ -275,7 +282,7 @@ def infer_out_dir(metakernel: str | Path, remote_root: str = DEFAULT_REMOTE_ROOT
     return None
 
 
-def split_host(text: str) -> tuple[str, int]:
+def split_host(text: str, default_port: int = 21) -> tuple[str, int]:
     """'spiftp.esac.esa.int', 'ftp://host', 'host:2121' -> (host, port)."""
     t = text.strip()
     t = re.sub(r"^[a-zA-Z]+://", "", t).split("/")[0]
@@ -285,7 +292,19 @@ def split_host(text: str) -> tuple[str, int]:
         h, _, pt = t.rpartition(":")
         if pt.isdigit():
             return h, int(pt)
-    return t, 21
+    return t, default_port
+
+
+def parse_server(text: str, https: bool = False) -> tuple[str, str, int]:
+    """(scheme, host, port) of the server field.  ``scheme`` is 'ftp' (port 21), or 'https' (port 443) when ``https`` is set.
+
+    An explicit prefix wins: 'https://host' / 'http://host' always use the web protocol, 'ftp://host' always FTP."""
+    m = re.match(r"^\s*([a-zA-Z]+)://", text)
+    scheme = m.group(1).lower() if m else ("https" if https else "ftp")
+    if scheme not in ("ftp", "http", "https"):
+        raise UtilityError(f"Unsupported protocol '{scheme}://' (use ftp, http or https).")
+    host, port = split_host(text, {"ftp": 21, "http": 80, "https": 443}[scheme])
+    return scheme, host, port
 
 
 # --------------------------------------------------------------------------------------------- download
@@ -337,46 +356,158 @@ def _connect(host: str, port: int, timeout: float) -> ftplib.FTP:
     return ftp
 
 
-def check_connection(host_text: str, timeout: float = 10.0) -> str:
-    host, port = split_host(host_text)
-    try:
-        ftp = _connect(host, port, timeout)
-    except Exception as exc:
-        raise UtilityError(f"Cannot connect to {host}:{port}\n{exc}") from exc
-    try:
-        return ftp.getwelcome().splitlines()[0] if ftp.getwelcome() else "connected"
-    finally:
+class _NotAvailable(Exception):
+    """The server says the file does not exist / may not be read (retrying will not help)."""
+
+
+class _FtpTransport:
+    """Anonymous FTP (port 21)."""
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        self.host, self.port, self.timeout = host, port, timeout
+        self.ftp: ftplib.FTP | None = None
+        self.reconnect()
+
+    def reconnect(self) -> None:
+        self.close()
         try:
-            ftp.quit()
-        except Exception:
-            pass
+            self.ftp = _connect(self.host, self.port, self.timeout)
+        except Exception as exc:
+            raise UtilityError(f"Cannot connect to {self.host}:{self.port}\n{exc}\n"
+                               "If port 21 is blocked on your network, tick 'Use HTTPS (port 443)'.") from exc
+
+    def greeting(self) -> str:
+        w = self.ftp.getwelcome()
+        return w.splitlines()[0] if w else "connected"
+
+    def size(self, path: str) -> int | None:
+        try:
+            return self.ftp.size(path)
+        except ftplib.error_perm:
+            return None
+
+    def retrieve(self, path: str, on_block: Callable[[bytes], None]) -> None:
+        try:
+            self.ftp.retrbinary(f"RETR {path}", on_block, blocksize=64 * 1024)
+        except ftplib.error_perm as exc:
+            raise _NotAvailable(str(exc).strip()) from exc
+
+    #: errors that mean 'network trouble: reconnect and retry'
+    transient = (OSError, EOFError, ftplib.Error)
+
+    def close(self) -> None:
+        f, self.ftp = getattr(self, "ftp", None), None
+        if f is not None:
+            try:
+                f.quit()
+            except Exception:
+                try:
+                    f.close()
+                except Exception:
+                    pass
+
+
+def _ssl_context() -> ssl.SSLContext:
+    try:
+        import certifi  # frozen macOS/Linux builds do not always find the system CA store
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
+
+
+class _HttpTransport:
+    """The same folders served over http(s) (port 443 for https): works where FTP is blocked."""
+
+    def __init__(self, scheme: str, host: str, port: int, timeout: float) -> None:
+        self.scheme, self.host, self.port, self.timeout = scheme, host, port, timeout
+        default = {"http": 80, "https": 443}[scheme]
+        self.base = f"{scheme}://{host}" + ("" if port == default else f":{port}")
+        self.ctx = _ssl_context() if scheme == "https" else None
+        self.reconnect()
+
+    def _url(self, path: str) -> str:
+        return f"{self.base}/{quote(path.lstrip('/'))}"
+
+    def _open(self, path: str, method: str = "GET"):
+        req = urllib.request.Request(self._url(path), method=method, headers={"User-Agent": "SimbioKernelUtility"})
+        return urllib.request.urlopen(req, timeout=self.timeout, context=self.ctx)
+
+    def reconnect(self) -> None:  # stateless: nothing to re-open, but fail early if the server is unreachable
+        pass
+
+    def greeting(self) -> str:
+        try:
+            with self._open("", "HEAD") as r:
+                return f"{self.base} - HTTP {r.status}"
+        except urllib.error.HTTPError as exc:  # a reply (even 403/404 on the root) proves the server is reachable
+            return f"{self.base} - HTTP {exc.code}"
+        except Exception as exc:
+            raise UtilityError(f"Cannot connect to {self.base}\n{getattr(exc, 'reason', exc)}") from exc
+
+    def size(self, path: str) -> int | None:
+        try:
+            with self._open(path, "HEAD") as r:
+                n = r.headers.get("Content-Length")
+                return int(n) if n and n.isdigit() else None
+        except urllib.error.HTTPError:
+            return None
+
+    def retrieve(self, path: str, on_block: Callable[[bytes], None]) -> None:
+        try:
+            with self._open(path) as r:
+                while True:
+                    block = r.read(64 * 1024)
+                    if not block:
+                        break
+                    on_block(block)
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403, 404, 410):
+                raise _NotAvailable(f"HTTP {exc.code} {exc.reason}") from exc
+            raise
+
+    transient = (OSError, EOFError, urllib.error.URLError)
+
+    def close(self) -> None:
+        pass
+
+
+def _transport(server_text: str, https: bool, timeout: float):
+    scheme, host, port = parse_server(server_text, https)
+    if scheme == "ftp":
+        return _FtpTransport(host, port, timeout)
+    return _HttpTransport(scheme, host, port, timeout)
+
+
+def check_connection(host_text: str, timeout: float = 10.0, https: bool = False) -> str:
+    tr = _transport(host_text, https, timeout)
+    try:
+        return tr.greeting()
+    finally:
+        tr.close()
 
 
 def download(plan: DownloadPlan, host_text: str | None = None, *, overwrite: bool = False,
              cancel: Callable[[], bool] = lambda: False, progress: Callable[[Progress], None] = lambda p: None,
-             timeout: float = 30.0, retries: int = 2) -> Report:
-    host, port = split_host(host_text or plan.host)
+             timeout: float = 30.0, retries: int = 2, https: bool = False) -> Report:
+    """Download every kernel of the plan.  ``https=True`` fetches the same paths over HTTPS (port 443) instead of FTP
+    (port 21) - for networks that block FTP."""
+    server = host_text or plan.host
     rep = Report(skipped=list(plan.metakernel.skipped))
     t0 = time.time()
     entries = plan.metakernel.entries
     total = len(entries)
-    ftp: ftplib.FTP | None = None
+    tr = None  # transport: FTP or HTTP(S)
     last_emit = [0.0]
 
-    def connect() -> ftplib.FTP:
-        try:
-            return _connect(host, port, timeout)
-        except Exception as exc:
-            raise UtilityError(f"Cannot connect to {host}:{port}\n{exc}") from exc
+    def connect():
+        return _transport(server, https, timeout)
 
-    def remote_size(f: ftplib.FTP, path: str) -> int | None:
-        try:
-            return f.size(path)
-        except ftplib.error_perm:
-            return None
+    def remote_size(f, path: str) -> int | None:
+        return f.size(path)
 
     try:
-        ftp = connect()
+        tr = connect()
+        tr.greeting()  # fail fast (UtilityError) when the server cannot be reached at all
         for n, e in enumerate(entries, 1):
             if cancel():
                 rep.cancelled = True
@@ -387,10 +518,11 @@ def download(plan: DownloadPlan, host_text: str | None = None, *, overwrite: boo
                 # an interrupted earlier run leaves no final file (we write to .part), so presence == complete;
                 # still compare sizes when the server can tell us, to catch truncated/foreign files
                 try:
-                    rs = remote_size(ftp, remote)
-                except (OSError, EOFError, ftplib.Error):
-                    ftp = connect()
-                    rs = remote_size(ftp, remote)
+                    rs = remote_size(tr, remote)
+                except tr.transient:
+                    tr.close()
+                    tr = connect()
+                    rs = remote_size(tr, remote)
                 if rs is None or rs == dest.stat().st_size:
                     rep.existing += 1
                     progress(Progress(n, total, e.rel, "exists", dest.stat().st_size, dest.stat().st_size))
@@ -400,7 +532,7 @@ def download(plan: DownloadPlan, host_text: str | None = None, *, overwrite: boo
             err = ""
             for attempt in range(retries + 1):
                 try:
-                    size = remote_size(ftp, remote) or 0
+                    size = remote_size(tr, remote) or 0
                     progress(Progress(n, total, e.rel, "start", 0, size))
                     done = 0
                     with open(part, "wb") as fh:
@@ -415,7 +547,7 @@ def download(plan: DownloadPlan, host_text: str | None = None, *, overwrite: boo
                                 last_emit[0] = now
                                 progress(Progress(n, total, e.rel, "bytes", done, size))
 
-                        ftp.retrbinary(f"RETR {remote}", on_block, blocksize=64 * 1024)
+                        tr.retrieve(remote, on_block)
                     os.replace(part, dest)
                     rep.downloaded += 1
                     rep.bytes += done
@@ -426,18 +558,15 @@ def download(plan: DownloadPlan, host_text: str | None = None, *, overwrite: boo
                     rep.cancelled = True
                     err = ""
                     break
-                except ftplib.error_perm as exc:  # 550: no such file / not allowed - retrying will not help
-                    err = f"not available on the server ({str(exc).strip()})"
+                except _NotAvailable as exc:  # 550 / HTTP 404: no such file / not allowed - retrying will not help
+                    err = f"not available on the server ({exc})"
                     break
-                except (OSError, EOFError, ftplib.Error) as exc:  # network trouble: reconnect and retry
-                    err = str(exc).strip() or exc.__class__.__name__
-                    try:
-                        ftp.close()
-                    except Exception:
-                        pass
+                except tr.transient as exc:  # network trouble: reconnect and retry
+                    err = str(getattr(exc, "reason", exc)).strip() or exc.__class__.__name__
+                    tr.close()
                     if attempt < retries:
                         time.sleep(1.0)
-                        ftp = connect()
+                        tr = connect()
             if part.exists() and (err or rep.cancelled):
                 try:
                     part.unlink()
@@ -454,13 +583,7 @@ def download(plan: DownloadPlan, host_text: str | None = None, *, overwrite: boo
             plan.new_metakernel.write_text(text, encoding="utf-8", newline="\n")
             rep.metakernel = plan.new_metakernel
     finally:
-        if ftp is not None:
-            try:
-                ftp.quit()
-            except Exception:
-                try:
-                    ftp.close()
-                except Exception:
-                    pass
+        if tr is not None:
+            tr.close()
         rep.seconds = time.time() - t0
     return rep

@@ -64,8 +64,20 @@ def test_split_host():
     assert dl.split_host("spiftp.esac.esa.int") == ("spiftp.esac.esa.int", 21)
     assert dl.split_host(" ftp://example.org/x ") == ("example.org", 21)
     assert dl.split_host("127.0.0.1:2121") == ("127.0.0.1", 2121)
+    assert dl.split_host("example.org", 443) == ("example.org", 443)
     with pytest.raises(UtilityError):
         dl.split_host("  ")
+
+
+def test_parse_server():
+    assert dl.parse_server("spiftp.esac.esa.int") == ("ftp", "spiftp.esac.esa.int", 21)
+    assert dl.parse_server("spiftp.esac.esa.int", https=True) == ("https", "spiftp.esac.esa.int", 443)
+    assert dl.parse_server("host:8443", https=True) == ("https", "host", 8443)
+    assert dl.parse_server("http://127.0.0.1:8000") == ("http", "127.0.0.1", 8000)
+    assert dl.parse_server("https://example.org/data") == ("https", "example.org", 443)  # prefix wins over the flag
+    assert dl.parse_server("ftp://example.org", https=True) == ("ftp", "example.org", 21)
+    with pytest.raises(UtilityError):
+        dl.parse_server("gopher://x")
 
 
 def test_make_plan_validation(tmp_path):
@@ -186,3 +198,85 @@ def test_unreachable_host_raises(tmp_path):
     plan = dl.make_plan(src, tmp_path / "out")
     with pytest.raises(UtilityError):
         dl.download(plan, "127.0.0.1:1")
+
+
+# ------------------------------------------------------------------------------------------ HTTP(S) transport (port 443 mode)
+@pytest.fixture()
+def http_server(tmp_path):
+    import functools
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+    src_mk = mock.build(tmp_path / "src")
+    served = tmp_path / "served"
+    shutil.copytree(src_mk.parent.parent, served / "data/SPICE/BEPICOLOMBO/kernels")
+    (served / "data/SPICE/BEPICOLOMBO/kernels/spk/big.bin").write_bytes(b"x" * 300_000)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=str(served)))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}", src_mk, served
+    srv.shutdown()
+    srv.server_close()
+
+
+def test_http_check_connection(http_server):
+    host, _, _ = http_server
+    assert "HTTP 200" in dl.check_connection(host)
+    with pytest.raises(UtilityError):
+        dl.check_connection("http://127.0.0.1:1")
+
+
+def test_http_download_resume_and_resulting_metakernel(http_server, tmp_path):
+    host, src_mk, served = http_server
+    mk = _mk_with_extra(src_mk, tmp_path)
+    plan = dl.make_plan(mk, tmp_path / "out")
+    events = []
+    rep = dl.download(plan, host, progress=events.append, https=True)
+    assert rep.ok and rep.downloaded == 6 and rep.existing == 0
+    assert any(e.status == "bytes" for e in events)
+    for e in plan.metakernel.entries:
+        assert plan.local(e).read_bytes() == (served / plan.remote(e)).read_bytes()
+    assert not list(plan.kernels_dir.rglob("*.part"))
+    ks = KernelSession()
+    try:
+        assert ks.load(rep.metakernel).total == 6
+    finally:
+        ks.unload()
+    # second run skips everything; a truncated file is fetched again
+    assert dl.download(plan, host, https=True).existing == 6
+    (plan.kernels_dir / "spk/big.bin").write_bytes(b"x" * 10)
+    rep = dl.download(plan, host, https=True)
+    assert rep.downloaded == 1 and rep.existing == 5
+
+
+def test_http_missing_file_is_reported_but_others_continue(http_server, tmp_path):
+    host, src_mk, _ = http_server
+    text = src_mk.read_text().replace("'$KERNELS/spk/mock.bsp'", "'$KERNELS/spk/nope.bsp', '$KERNELS/spk/mock.bsp'")
+    p = tmp_path / "m.tm"
+    p.write_text(text)
+    plan = dl.make_plan(p, tmp_path / "out")
+    rep = dl.download(plan, host)
+    assert not rep.ok and [f[0] for f in rep.failed] == ["spk/nope.bsp"] and rep.downloaded == 5
+    assert "404" in rep.failed[0][1]
+
+
+def test_http_cancel_leaves_no_partial_files(http_server, tmp_path):
+    host, src_mk, _ = http_server
+    plan = dl.make_plan(_mk_with_extra(src_mk, tmp_path), tmp_path / "out")
+    count = {"n": 0}
+
+    def cancel():
+        count["n"] += 1
+        return count["n"] > 12
+
+    rep = dl.download(plan, host, cancel=cancel)
+    assert rep.cancelled and rep.metakernel is None
+    assert not list(plan.kernels_dir.rglob("*.part"))
+
+
+def test_http_unreachable_raises_quickly(tmp_path):
+    plan = dl.make_plan(mock.build(tmp_path / "s"), tmp_path / "out")
+    with pytest.raises(UtilityError):
+        dl.download(plan, "http://127.0.0.1:1")

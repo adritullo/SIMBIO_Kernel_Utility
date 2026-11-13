@@ -377,3 +377,46 @@ def test_search_card(win, tmp_path):
     finally:
         srv.shutdown()
         c.url.setText(mkindex.DEFAULT_URL)
+
+
+def test_download_card_https_option(win, tmp_path):
+    """The 'Use HTTPS (port 443)' option is off by default, is remembered, and downloads over the web protocol."""
+    import functools
+    import shutil
+    import threading
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+    from simbio_utility.core import download as dl
+
+    w, app = win
+    c = w.dl_card
+    assert not c.chk_https.isChecked()
+    c.chk_https.setChecked(True)
+    assert c.config.get_bool("dl_https", False) is True
+
+    class Quiet(SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+    src = mock.build(tmp_path / "src")
+    served = tmp_path / "served"
+    shutil.copytree(src.parent.parent, served / "data/SPICE/BEPICOLOMBO/kernels")
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=str(served)))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        w.path.setText(str(src))
+        c.out.setText(str(tmp_path / "out"))
+        c.host.setText(f"http://127.0.0.1:{srv.server_address[1]}")
+        c.refresh()
+        c.btn_test.click()
+        assert "reachable" in c.status.text() and "not reachable" not in c.status.text() and not c.error.isVisible()
+        c.btn.click()
+        t = time.time()
+        while c._thread is not None and time.time() - t < 20:
+            app.processEvents()
+            time.sleep(0.01)
+        assert (tmp_path / "out" / dl.DEFAULT_REMOTE_ROOT / "spk" / "mock.bsp").is_file()
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        c.chk_https.setChecked(False)
+        c.host.setText(dl.DEFAULT_HOST)

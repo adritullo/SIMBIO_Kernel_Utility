@@ -20,9 +20,9 @@ class _DownloadThread(QThread):
     finished_ok = Signal(object)  # download.Report
     failed = Signal(str)
 
-    def __init__(self, plan: dl.DownloadPlan, host: str, overwrite: bool) -> None:
+    def __init__(self, plan: dl.DownloadPlan, host: str, overwrite: bool, https: bool = False) -> None:
         super().__init__()
-        self.plan, self.host, self.overwrite = plan, host, overwrite
+        self.plan, self.host, self.overwrite, self.https = plan, host, overwrite, https
         self._cancel = False
 
     def cancel(self) -> None:
@@ -31,7 +31,7 @@ class _DownloadThread(QThread):
     def run(self) -> None:
         try:
             rep = dl.download(self.plan, self.host, overwrite=self.overwrite, cancel=lambda: self._cancel,
-                              progress=self.progress.emit)
+                              progress=self.progress.emit, https=self.https)
             self.finished_ok.emit(rep)
         except UtilityError as exc:
             self.failed.emit(str(exc))
@@ -82,13 +82,18 @@ class DownloadCard(Card):
         hrow = QHBoxLayout()
         self.host = QLineEdit(str(self.config.get("dl_host", "") or dl.DEFAULT_HOST))
         self.host.setProperty("mono", True)
-        self.host.setToolTip(f"Anonymous FTP server. Default: {dl.DEFAULT_HOST}\n"
+        self.host.setToolTip(f"Anonymous FTP / HTTPS server. Default: {dl.DEFAULT_HOST}\n"
                              "Another host can be typed (optionally host:port); clear the field to restore the default.")
+        self.chk_https = QCheckBox("Use HTTPS (port 443) instead of FTP (port 21)")
+        self.chk_https.setChecked(self.config.get_bool("dl_https", False))
+        self.chk_https.setToolTip("Downloads the same files from the same server over the normal web port 443.\n"
+                                  "Tick it when your network blocks FTP (port 21) - e.g. 'Cannot connect' or time-outs.")
         self.btn_test = QPushButton("Test")
         self.btn_test.setToolTip("Connect anonymously and report the server greeting")
         hrow.addWidget(self.host, 1)
         hrow.addWidget(self.btn_test)
         left.body.addLayout(hrow)
+        left.body.addWidget(self.chk_https)
 
         left.body.addWidget(label("Remote kernels path", "muted"))
         self.remote = QLineEdit(str(self.config.get("dl_remote_root", "") or dl.DEFAULT_REMOTE_ROOT))
@@ -161,6 +166,7 @@ class DownloadCard(Card):
         self.out.textChanged.connect(self._refresh_deb)
         self.remote.textChanged.connect(self._refresh_deb)
         self.host.editingFinished.connect(self._host_edited)
+        self.chk_https.toggled.connect(lambda on: self.config.set("dl_https", bool(on)))
         self.remote.editingFinished.connect(self._remote_edited)
         self.out.editingFinished.connect(lambda: self.config.set("dl_out_dir", self.out.text().strip()))
         bb.clicked.connect(self._browse)
@@ -245,9 +251,9 @@ class DownloadCard(Card):
         try:
             self.status.setText("Testing connection…")
             self.repaint()
-            greeting = dl.check_connection(self.host.text())
+            greeting = dl.check_connection(self.host.text(), https=self.chk_https.isChecked())
             self.status.setText("Server reachable")
-            self._log(f"✓ {self.host.text().strip()}: {greeting}")
+            self._log(f"✓ {self.host.text().strip()} ({'HTTPS' if self.chk_https.isChecked() else 'FTP'}): {greeting}")
         except UtilityError as exc:
             self.status.setText("Server not reachable")
             self._show_error(str(exc))
@@ -259,7 +265,7 @@ class DownloadCard(Card):
             return
         self._show_error("")
         try:
-            dl.split_host(self.host.text())
+            dl.parse_server(self.host.text(), self.chk_https.isChecked())
             plan = dl.make_plan(self.metakernel_path(), self.out.text(), self.remote.text())
         except UtilityError as exc:
             self._show_error(str(exc))
@@ -277,7 +283,7 @@ class DownloadCard(Card):
         for s in plan.metakernel.skipped:
             self._log(f"  ignored (no $SYMBOL path): {s}")
         self._t0 = time.time()
-        self._thread = _DownloadThread(plan, self.host.text(), self.chk_over.isChecked())
+        self._thread = _DownloadThread(plan, self.host.text(), self.chk_over.isChecked(), self.chk_https.isChecked())
         self._thread.progress.connect(self._on_progress)
         self._thread.finished_ok.connect(self._on_done)
         self._thread.failed.connect(self._on_failed)
@@ -291,7 +297,7 @@ class DownloadCard(Card):
             self.status.setText("Cancelling…")
 
     def _set_busy(self, busy: bool) -> None:
-        for w in (self.btn, self.btn_test, self.host, self.remote, self.out, self.chk_over):
+        for w in (self.btn, self.btn_test, self.host, self.chk_https, self.remote, self.out, self.chk_over):
             w.setEnabled(not busy)
         self.btn_cancel.setEnabled(busy)
 

@@ -1,8 +1,19 @@
 # SIMBIO Kernel Utility
 
-Standalone desktop tool (Python · SpiceyPy · NumPy · PySide6) that turns a BepiColombo **metakernel** into quick answers
-about mission time and SIMBIO-SYS observation geometry. One metakernel is loaded once (top bar, or drag & drop a `.tm`)
-and feeds every card.
+Standalone desktop tool, based on open-source resources (Python, SpiceyPy, NumPy and PySide6) that interrogate BepiColombo **kernel** into quick answers
+about mission time and SIMBIO-SYS observation geometry. The metakernel is loaded once (top bar, or drag & drop a `.tm`)
+and feeds every windos tool (here referred as "cards").
+
+## Quickstart
+0. Download the standalone release you need from the ___Release___ section on the right of the page (and unzip it).  
+
+(If you already have kernel downloaded just *jump directly to step 3*)
+1. The tool work around metakernels to define which kernel file take in consideration. If you don't have your version you can search and download the official one using the Search Kernel card. The default url ("https://spiftp.esac.esa.int/data/SPICE/BEPICOLOMBO/kernels/mk/") will give you the official one automatically update by ESA. Press __Search__ to have the list of mk available at the moment, select the desired one and press "Download and use as metakernel" (or just "Dowload selected" if you don't intend to use it).
+2. In the card "Kernel Download" select the destination folder you want to use and then ___Download kernels___. When finished the downloaded metakernel will be automatically addressed. You are ready to go (*jump to step 4*).
+3. Browse the metakernel you want to use with ___Browse___ then ___Load___. The number of correct kernel file loaded will be show in the up-right corner in green.
+4. The tools of the suite can be addressed directly from the list on the left part. 
+5. The Time Converter permits to translate time in the UTC and Epoch format. Just write or paste the original in the correct form.
+6. Observation Geometry permits to calculate the main information regarding the capacity of observation of the selected camera at the moment decided. A simple hillshade rendered in the lower part simulate the illumination condition and the And the ability to observe surface features as a function of resolution (roughly approximate). The arrows around the date permit respectively to jump 1 s, 1 m and 1 h backward or forward in time.
 
 ## Cards
 

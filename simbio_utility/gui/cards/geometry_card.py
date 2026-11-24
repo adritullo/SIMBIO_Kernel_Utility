@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal
+from PySide6.QtCore import QEvent, QObject, QRunnable, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLineEdit, QPushButton,
                                QScrollArea, QVBoxLayout, QWidget)
 
@@ -21,11 +21,21 @@ from .. import theme
 from ..widgets import Debouncer, ImageView, Panel, Segmented, Tile, copy_to_clipboard, label
 from .base import Card
 
+def _fmt_ms(v: float) -> str:
+    if v != v or v == float("inf"):
+        return "—"
+    return f"{v:.3f}" if v < 10 else f"{v:.2f}" if v < 1000 else f"{v:.0f}"
+
+
 # (key, caption, unit, formatter, tooltip)
 METRICS = [
     ("resolution_m_px", "Ground resolution", "m/px", lambda r: f"{r.resolution_m_px:.2f}", "Central pixel: slant range × IFOV / cos(emission)"),
     ("altitude_km", "Flight altitude", "km", lambda r: f"{r.altitude_km:.2f}", "Above the reference ellipsoid at the sub-spacecraft point"),
     ("orbital_velocity_kms", "Orbital velocity", "km/s", lambda r: f"{r.orbital_velocity_kms:.4f}", "Inertial speed of the spacecraft relative to Mercury (J2000)"),
+    ("ground_speed_kms", "Ground speed · central px", "km/s", lambda r: f"{r.ground_speed_kms:.4f}" if r.ground_speed_kms == r.ground_speed_kms else "—",
+     "Speed of the boresight intercept point over the surface (Mercury-fixed frame, ±0.5 s finite difference)"),
+    ("smear_quarter_px_ms", "Smear time · ¼ pixel", "ms", lambda r: _fmt_ms(r.smear_quarter_px_ms),
+     "Time for the ground under the central pixel to move a quarter of a pixel:\n0.25 × ground resolution / ground speed"),
     ("lat_deg", "Latitude · central px", "°", lambda r: f"{r.lat_deg:.4f}", "Planetocentric, boresight intercept"),
     ("lon_deg", "Longitude · central px", "°E", lambda r: f"{r.lon_deg:.4f}", "East-positive, boresight intercept"),
     ("slant_range_km", "Slant range", "km", lambda r: f"{r.slant_range_km:.2f}", "Spacecraft → central pixel distance"),
@@ -116,7 +126,9 @@ class GeometryCard(Card):
 
         # ---------------- inputs ----------------
         left = Panel("Inputs")
-        left.setFixedWidth(460)
+        left.setMinimumWidth(300)
+        left.setMaximumWidth(460)
+        self.left_panel, self.left_max = left, 460
         left.body.addWidget(label("Channel", "muted"))
         self.channel = QComboBox()
         left.body.addWidget(self.channel)
@@ -162,7 +174,12 @@ class GeometryCard(Card):
         step_row.addWidget(_step_button("›", 1.0, "Forward 1 second"))
         step_row.addWidget(_step_button("»", 60.0, "Forward 1 minute"))
         step_row.addWidget(_step_button("»»»", 3600.0, "Forward 1 hour"))
+        self._time_alone = QVBoxLayout()  # narrow panels: the epoch field gets its own row above the step buttons
+        self._time_alone.setContentsMargins(0, 0, 0, 0)
+        left.body.addLayout(self._time_alone)
         left.body.addLayout(step_row)
+        self._step_row = step_row
+        self._time_split = False
         self.time_echo = label("", "small", selectable=True)
         left.body.addWidget(self.time_echo)
 
@@ -211,7 +228,8 @@ class GeometryCard(Card):
         self.error.hide()
         left.body.addWidget(self.error)
         left.body.addStretch(1)
-        outer.addWidget(left)
+        outer.addWidget(left, 1)
+        left.installEventFilter(self)
 
         # ---------------- results ----------------
         scroll = QScrollArea()
@@ -224,8 +242,9 @@ class GeometryCard(Card):
 
         head = Panel()
         head.body.setContentsMargins(22, 16, 22, 16)
-        hl = QHBoxLayout()
-        hl.setSpacing(22)
+        self.head_grid = hl = QGridLayout()
+        hl.setHorizontalSpacing(22)
+        hl.setVerticalSpacing(12)
         sb = QVBoxLayout()
         sb.setSpacing(0)
         sb.addWidget(label("SEASON", "tilelabel"))
@@ -234,34 +253,35 @@ class GeometryCard(Card):
         self.season_desc = label("Run a computation", "muted")
         sb.addWidget(self.season)
         sb.addWidget(self.season_desc)
-        hl.addLayout(sb)
+        self._season_box = sb
         self.t_mta = Tile("MTA · true anomaly", "°", "Mercury True Anomaly (heliocentric orbit, ECLIPJ2000)")
-        self.t_mta.setMinimumWidth(150)
+        self.t_mta.setMinimumWidth(120)
         self.t_plan = Tile("Mission plan", "", "MTP = 4 consecutive STPs (MTP1 = STP1-4 ...), from the event file in Settings")
-        self.t_plan.setMinimumWidth(190)
-        hl.addWidget(self.t_mta, 1)
-        hl.addWidget(self.t_plan, 1)
+        self.t_plan.setMinimumWidth(150)
+        hl.addLayout(sb, 0, 0)
+        self._head_wide = None
+        self._arrange_head(True)
         head.body.addLayout(hl)
         self.echo = label("", "small", wrap=True, selectable=True)
         head.body.addWidget(self.echo)
         col.addWidget(head)
 
-        grid = QGridLayout()
+        self.grid = grid = QGridLayout()
         grid.setSpacing(12)
         self.tiles: dict[str, Tile] = {}
-        for i, (key, cap, unit, _fmt, tip) in enumerate(METRICS):
-            t = Tile(cap, unit, tip)
-            self.tiles[key] = t
-            grid.addWidget(t, i // 3, i % 3)
-        for c in range(3):
-            grid.setColumnStretch(c, 1)
+        for key, cap, unit, _fmt, tip in METRICS:
+            self.tiles[key] = Tile(cap, unit, tip)
+        self._grid_cols = 0
+        self._results_scroll = scroll
+        self._reflow_tiles(3)
         col.addLayout(grid)
+        scroll.viewport().installEventFilter(self)
         self.note = label("", "note", wrap=True)
         col.addWidget(self.note)
 
         self.hs_panel = Panel("Illumination preview · reference terrain")
         self.view = ImageView()
-        self.view.setMinimumHeight(360)
+        self.view.setMinimumHeight(260)
         self.hs_panel.body.addWidget(self.view, 1)
         self.hs_caption = label("", "note", wrap=True)
         self.hs_panel.body.addWidget(self.hs_caption)
@@ -289,6 +309,69 @@ class GeometryCard(Card):
         self.chk_shadow.toggled.connect(lambda *_: self._hs_toggled(self.chk_hs.isChecked()))
         self.chk_scale.toggled.connect(lambda *_: self._hs_toggled(self.chk_hs.isChecked()))
         self.hs_panel.setVisible(self.chk_hs.isChecked())
+
+    # ------------------------------------------------------------------ layout
+    def _reflow_tiles(self, ncol: int) -> None:
+        """3 tile columns on wide windows, 2 on narrow ones (small laptops)."""
+        if ncol == self._grid_cols:
+            return
+        self._grid_cols = ncol
+        for t in self.tiles.values():
+            self.grid.removeWidget(t)
+        for i, t in enumerate(self.tiles.values()):
+            self.grid.addWidget(t, i // ncol, i % ncol)
+        for c in range(3):
+            self.grid.setColumnStretch(c, 1 if c < ncol else 0)
+
+    def _arrange_head(self, wide: bool) -> None:
+        """Season | MTA | plan on one row, or season | MTA over the plan when narrow."""
+        if wide == self._head_wide:
+            return
+        self._head_wide = wide
+        g = self.head_grid
+        g.removeWidget(self.t_mta)
+        g.removeWidget(self.t_plan)
+        g.removeItem(self._season_box)
+        if wide:
+            g.addLayout(self._season_box, 0, 0)
+            g.addWidget(self.t_mta, 0, 1)
+            g.addWidget(self.t_plan, 0, 2)
+            for c, s in ((0, 0), (1, 1), (2, 1)):
+                g.setColumnStretch(c, s)
+        else:  # season | MTA, then the mission plan on its own row (its value is the widest)
+            g.addLayout(self._season_box, 0, 0)
+            g.addWidget(self.t_mta, 0, 1)
+            g.addWidget(self.t_plan, 1, 0, 1, 2)
+            for c, s in ((0, 0), (1, 1), (2, 0)):
+                g.setColumnStretch(c, s)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        QTimer.singleShot(0, self._relayout)
+
+    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        if e.type() == QEvent.Resize:
+            QTimer.singleShot(0, self._relayout)
+        return False
+
+    def _relayout(self) -> None:
+        if not hasattr(self, "_step_row"):
+            return
+        vw = self._results_scroll.viewport().width()
+        self._reflow_tiles(max(1, min(3, (vw + 6) // (175 + 12))))
+        self._arrange_head(vw >= 520)
+        split = self.left_panel.width() < 440
+        if split != self._time_split:
+            self._time_split = split
+            if split:
+                self._step_row.removeWidget(self.time_in)
+                self._time_alone.addWidget(self.time_in)
+                self._step_row.insertStretch(3, 1)
+            else:
+                self._time_alone.removeWidget(self.time_in)
+                stretch = self._step_row.itemAt(3)
+                self._step_row.removeItem(stretch)
+                self._step_row.insertWidget(3, self.time_in, 1)
 
     # ------------------------------------------------------------------ cameras
     def kernels_changed(self) -> None:
@@ -351,6 +434,12 @@ class GeometryCard(Card):
 
     def camera(self) -> str:
         return self.filter.currentData() or ""
+
+    def select_camera(self, name: str) -> None:
+        cam = next((c for c in self._cameras if c.name == name), None)
+        if cam:
+            self.channel.setCurrentText(cam.channel)
+            self._fill_filters(prefer=cam.filter)
 
     # ------------------------------------------------------------------ time
     def set_et(self, et: float) -> None:
@@ -488,7 +577,7 @@ class GeometryCard(Card):
         self._job += 1
         self._hs_signals.latest = self._job
         self.hs_caption.setStyleSheet("")
-        self.hs_caption.setText("Rendering…")
+        self.view.set_message("Rendering…")  # centred on the image, where it is seen (the caption is often below the fold)
         self.config.set("hs_scale", self.chk_scale.isChecked())
         res = r.resolution_m_px if self.chk_scale.isChecked() else None
         job = _HsJob(self._hs_signals, self._job, self.dtm_path.text().strip(), r.azimuth_deg, r.incidence_deg, self.chk_shadow.isChecked(), res)
@@ -514,6 +603,7 @@ class GeometryCard(Card):
             return
         self.hs_caption.setStyleSheet(f"color: {theme.DANGER};")
         self.hs_caption.setText(msg)
+        self.view.set_message("Rendering failed - see the message below")
 
     def _save_png(self) -> None:
         p, _ = QFileDialog.getSaveFileName(self, "Save hillshade", "hillshade.png", "PNG (*.png)")

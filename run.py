@@ -121,12 +121,14 @@ def _selftest(outfile: str) -> int:
         app.processEvents()
         lines.append(f"window ok: {win.windowTitle()} v{__version__}, {len(win.cards)} cards")
         win.close()
-        for n in ("icon.png", "icon.ico", "stp_default.evf", "arrow-down.png", "check.png"):
+        for n in ("icon.png", "icon.ico", "stp_default.evf", "bc_ltp_mtp_stp_test_v01.def", "arrow-down.png", "check.png"):
             assert resource_path(n).is_file(), f"missing resource {n}"
         for ch in ("STC-H", "HRIC"):
             d = dtm.load_dtm(default_dtm(ch), max_dim=200)
             lines.append(f"DTM {ch}: {d.z.shape} @ {d.pixel_size_m:g} m/px")
         lines.append(f"EVF: {AppConfig().stp_table().summary()}")
+        from simbio_utility.core.ltp import load_ltps
+        lines.append(f"LTP: {', '.join(l.label.split(':')[0] for l in load_ltps().values())}")
         lines.append("SELFTEST OK")
         code = 0
     except Exception:

@@ -14,11 +14,11 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
 def wait_hillshade(g, app, timeout=15.0):
-    """Wait until the hillshade worker has finished (caption no longer 'Rendering…')."""
+    """Wait until the hillshade worker has finished ('Rendering…' overlay gone and a caption shown)."""
     t = time.time()
     while time.time() - t < timeout:
         app.processEvents()
-        if g.hs_caption.text() not in ("", "Rendering…"):
+        if g.view.message != "Rendering…" and g.hs_caption.text():
             break
         time.sleep(0.01)
     spin(app, 50)
@@ -420,3 +420,99 @@ def test_download_card_https_option(win, tmp_path):
         srv.server_close()
         c.chk_https.setChecked(False)
         c.host.setText(dl.DEFAULT_HOST)
+
+
+def test_window_fits_small_screens(win):
+    """1366x768 at 125 % is ~1093x614 logical px: the window must go that small and the cards must reflow."""
+    w, app = win
+    assert w.minimumWidth() <= 800 and w.minimumHeight() <= 560
+    old = w.size()
+    try:
+        w.goto_card(w.geo_card)
+        w.resize(1093, 614)
+        spin(app, 300)
+        g = w.geo_card
+        assert w.width() <= 1093 and w.height() <= 614
+        assert g._grid_cols in (1, 2)  # 3 tile columns do not fit there
+        assert g.left_panel.width() <= 460
+        w.resize(1500, 950)
+        spin(app, 300)
+        assert g._grid_cols == 3 and g._head_wide
+    finally:
+        w.resize(old)
+        spin(app, 100)
+
+
+def test_smear_tile_and_rendering_overlay(win):
+    w, app = win
+    g = w.geo_card
+    g.channel.setCurrentText("HRIC")
+    g.time_in.setText("2027-06-20T12:00:00")
+    g.compute()
+    assert g.result is not None
+    r = g.result
+    assert r.smear_quarter_px_ms == pytest.approx(0.25 * r.resolution_m_px / (r.ground_speed_kms * 1e3) * 1e3)
+    assert g.tiles["smear_quarter_px_ms"].value.text() == f"{r.smear_quarter_px_ms:.3f}"
+    g.chk_hs.setChecked(True)
+    g._start_hillshade(r)
+    assert g.view.message == "Rendering…"  # centred on the image, not in the caption below it
+    wait_hillshade(g, app)
+    assert g.view.message in ("", "Night side · Sun below the local horizon")
+
+
+def test_positional_search_card(win, tmp_path):
+    w, app = win
+    ps = w.ps_card
+    assert ps.range_sel.index() == 0 and ps.start.text() == "2027-03-14T02:43:52"  # LTP1 by default
+    ps.range_sel.group.button(1).click()
+    assert ps.start.text() == "2027-07-04T02:42:27" and "LTP2" in ps.ltp_info.text()
+    # a point seen by HRIC at 2027-06-20 12:00 (from the Geometry card), searched over a custom day
+    g = w.geo_card
+    g.channel.setCurrentText("HRIC")
+    g.time_in.setText("2027-06-20T12:00:00")
+    g.compute()
+    lat, lon = g.result.lat_deg, g.result.lon_deg
+    ps.channel.setCurrentText("HRIC")
+    ps.lat.setText(f"{lat:.5f}")
+    ps.lon.setText(f"{lon:.5f}")
+    ps.start.setText("2027-06-20T06:00:00")
+    ps.start.textEdited.emit(ps.start.text())
+    assert ps.range_sel.index() == ps.range_sel.group.buttons().__len__() - 1  # typing a date -> Custom
+    ps.end.setText("2027-06-20T18:00:00")
+    ps.search()
+    t = time.time()
+    while ps._iter is not None and time.time() - t < 30:
+        app.processEvents()
+    assert ps.result is not None and len(ps.result.passes) == 1
+    assert ps.table.rowCount() == 1 and ps.table.item(0, 0).text().startswith("2027-06-20T11:59")
+    out = tmp_path / "p.csv"
+    ps.write_csv(out)
+    assert "best_utc" in out.read_text().splitlines()[0]
+    # open the pass in Observation Geometry
+    ps.table.selectRow(0)
+    ps.btn_geo.click()
+    spin(app, 100)
+    assert w.stack.currentWidget() is w.geo_card and w.geo_card.camera().endswith("HRIC_FPAN")
+    assert abs(w.geo_card.result.et - ps.result.passes[0].best.et) < 1e-3
+    # bad input
+    w.goto_card(ps)
+    ps.lat.setText("abc")
+    ps.search()
+    assert ps.error.isVisibleTo(ps) and ps._iter is None
+
+
+def test_interface_size_setting(win):
+    from simbio_utility.gui.app import apply_ui_scale
+    from simbio_utility.gui.main_window import SettingsDialog
+    w, app = win
+    d = SettingsDialog(w.cfg, w)
+    assert d.ui_scale.currentData() == 1.0
+    w.cfg.set("ui_scale", 0.85)
+    try:
+        assert w.cfg.ui_scale == 0.85
+        os.environ.pop("QT_SCALE_FACTOR", None)
+        apply_ui_scale()
+        assert os.environ.get("QT_SCALE_FACTOR") == "0.85"
+    finally:
+        os.environ.pop("QT_SCALE_FACTOR", None)
+        w.cfg.set("ui_scale", 1.0)

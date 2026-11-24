@@ -67,7 +67,9 @@ class DownloadCard(Card):
 
         # ---------------- inputs ----------------
         left = Panel("Source & destination")
-        left.setFixedWidth(460)
+        left.setMinimumWidth(300)
+        left.setMaximumWidth(460)
+        self.left_panel, self.left_max = left, 460
         left.body.addWidget(label("Metakernel (top bar)", "muted"))
         self.mk_label = label("", "mono", wrap=True, selectable=True)
         left.body.addWidget(self.mk_label)
@@ -84,7 +86,7 @@ class DownloadCard(Card):
         self.host.setProperty("mono", True)
         self.host.setToolTip(f"Anonymous FTP / HTTPS server. Default: {dl.DEFAULT_HOST}\n"
                              "Another host can be typed (optionally host:port); clear the field to restore the default.")
-        self.chk_https = QCheckBox("Use HTTPS (port 443) instead of FTP (port 21)")
+        self.chk_https = QCheckBox("Use HTTPS (port 443)")
         self.chk_https.setChecked(self.config.get_bool("dl_https", False))
         self.chk_https.setToolTip("Downloads the same files from the same server over the normal web port 443.\n"
                                   "Tick it when your network blocks FTP (port 21) - e.g. 'Cannot connect' or time-outs.")
@@ -131,7 +133,7 @@ class DownloadCard(Card):
         self.error.hide()
         left.body.addWidget(self.error)
         left.body.addStretch(1)
-        outer.addWidget(left)
+        outer.addWidget(left, 1)
 
         # ---------------- progress ----------------
         right = Panel("Progress")

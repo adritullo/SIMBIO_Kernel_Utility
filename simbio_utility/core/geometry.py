@@ -38,6 +38,7 @@ class GeometryResult:
     altitude_km: float
     slant_range_km: float
     orbital_velocity_kms: float
+    ground_speed_kms: float  # speed of the boresight intercept point over the (rotating) surface; nan if not computable
     lat_deg: float
     lon_deg: float
     sc_lat_deg: float
@@ -53,6 +54,7 @@ class GeometryResult:
     stp: int | None = None
     stp_in_mtp: int | None = None
     stp_window: str = ""
+    smear_quarter_px_ms: float = float("nan")  # 0.25 px / ground speed, milliseconds
 
     @property
     def plan_label(self) -> str:
@@ -95,6 +97,38 @@ def mercury_true_anomaly(et: float) -> tuple[float, float]:
         mu = DEFAULT_MU_SUN
     elts = sp.oscltx(state, et, mu)
     return math.degrees(elts[8]) % 360.0, float(elts[1])
+
+
+GROUND_SPEED_DT = 0.5  # s, half-width of the finite-difference window
+
+
+def ground_speed_kms(s: "GeometrySettings", et: float, frame: str, bsight, spoint0) -> float:
+    """Speed (km/s) of the boresight intercept point over the surface, in the body-fixed frame (so Mercury's rotation is
+    included): the intercept is recomputed at ``et -/+ dt`` and the chord between the two body-fixed points divided by
+    the time span.  Falls back to a one-sided difference at the edge of the SPK coverage; nan when that is not possible."""
+    fixref = f"IAU_{s.target}"
+
+    def at(t: float):
+        try:
+            return np.asarray(sp.sincpt(s.method, s.target, t, fixref, s.abcorr, s.observer, frame, bsight)[0])
+        except Exception:
+            return None
+
+    dt = GROUND_SPEED_DT
+    before, after = at(et - dt), at(et + dt)
+    if before is not None and after is not None:
+        return float(np.linalg.norm(after - before)) / (2 * dt)
+    other, span = (after, dt) if after is not None else (before, dt)
+    if other is None:
+        return float("nan")
+    return float(np.linalg.norm(other - np.asarray(spoint0))) / span
+
+
+def smear_time_ms(resolution_m_px: float, ground_speed_kms: float, fraction_px: float = 0.25) -> float:
+    """Time (ms) for the ground to move ``fraction_px`` pixels under the camera: fraction × resolution / speed."""
+    if not (ground_speed_kms > 0) or not math.isfinite(resolution_m_px):
+        return float("nan")
+    return fraction_px * resolution_m_px / (ground_speed_kms * 1e3) * 1e3
 
 
 def sun_azimuth_deg(spoint: np.ndarray, sun_vec: np.ndarray, radii: np.ndarray) -> float:
@@ -146,6 +180,7 @@ def compute(camera: str, et: float, settings: GeometrySettings = GeometrySetting
 
         state, _lt = sp.spkezr(s.observer, et, "J2000", "NONE", s.target)
         velocity = sp.vnorm(state[3:])
+        gspeed = ground_speed_kms(s, et, frame, bsight, spoint)
 
         mta, ecc = mercury_true_anomaly(et)
         epoch_et = timeconv.utc_to_et(s.seasons.epoch_utc)
@@ -174,6 +209,8 @@ def compute(camera: str, et: float, settings: GeometrySettings = GeometrySetting
         altitude_km=altitude,
         slant_range_km=slant_km,
         orbital_velocity_kms=velocity,
+        ground_speed_kms=gspeed,
+        smear_quarter_px_ms=smear_time_ms(resolution, gspeed, 0.25),
         lat_deg=math.degrees(lat),
         lon_deg=_wrap_lon(math.degrees(lon), s.lon_domain),
         sc_lat_deg=math.degrees(sublat),

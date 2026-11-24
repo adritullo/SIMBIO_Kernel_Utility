@@ -48,7 +48,7 @@ class Tile(QFrame):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 13, 16, 14)
         lay.setSpacing(4)
-        lay.addWidget(label(caption.upper(), "tilelabel"))
+        lay.addWidget(label(caption.upper(), "tilelabel", wrap=True))  # wraps on narrow windows instead of forcing width
         row = QHBoxLayout()
         row.setSpacing(6)
         self.value = label("—", "value")
@@ -188,6 +188,11 @@ class ImageView(QGraphicsView):
         self.fit()
         self.viewport().update()
 
+    def set_message(self, message: str) -> None:
+        """Centred overlay text (e.g. 'Rendering…', 'Night side …'), keeping the current image."""
+        self.message = message
+        self.viewport().update()
+
     def png(self, path: str) -> bool:
         pm = self.grab()
         return pm.save(path)
@@ -262,6 +267,11 @@ class ImageView(QGraphicsView):
         if self.message:
             f.setPointSizeF(11)
             p.setFont(f)
-            p.setPen(QColor(255, 255, 255, 230))
-            p.drawText(QRectF(0, 0, vw, vh), Qt.AlignCenter, self.message)
+            box = p.fontMetrics().boundingRect(QRectF(0, 0, vw - 40, vh).toRect(), Qt.AlignCenter | Qt.TextWordWrap, self.message)
+            box = QRectF(box).adjusted(-16, -9, 16, 9)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 165))
+            p.drawRoundedRect(box, 10, 10)
+            p.setPen(QColor(255, 255, 255, 235))
+            p.drawText(QRectF(20, 0, vw - 40, vh), Qt.AlignCenter | Qt.TextWordWrap, self.message)
         p.restore()

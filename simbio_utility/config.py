@@ -32,6 +32,15 @@ class AppConfig:
         return v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes")
 
     @property
+    def ui_scale(self) -> float:
+        """Interface size factor (1.0 = 100 %), applied at start-up through QT_SCALE_FACTOR."""
+        try:
+            v = float(self.get("ui_scale", 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        return v if 0.5 <= v <= 2.0 else 1.0
+
+    @property
     def abcorr(self) -> str:
         return str(self.get("abcorr", "LT+S"))
 

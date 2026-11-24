@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QStackedLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QScrollArea, QStackedLayout, QVBoxLayout, QWidget
 
 from ...config import AppConfig
 from ..widgets import label
@@ -25,7 +25,12 @@ class Card(QWidget):
         self._stack = QStackedLayout(self)
         self.content = QWidget()
         self.build(self.content)
-        self._stack.addWidget(self.content)
+        # small screens / large scaling: the card scrolls instead of forcing a huge window
+        self.scroller = QScrollArea()
+        self.scroller.setWidgetResizable(True)
+        self.scroller.setFrameShape(QFrame.NoFrame)
+        self.scroller.setWidget(self.content)
+        self._stack.addWidget(self.scroller)
         ph = QWidget()
         pl = QVBoxLayout(ph)
         pl.setAlignment(Qt.AlignCenter)
@@ -33,6 +38,15 @@ class Card(QWidget):
         pl.addWidget(label("Choose a BepiColombo .tm file in the bar above — it is used by every card.", "muted"), 0, Qt.AlignCenter)
         self._stack.addWidget(ph)
         self.set_ready(not self.needs_kernels)
+
+    #: the input panel on the left (set by the subclass); narrowed on small windows so the results keep the room
+    left_panel: QWidget | None = None
+    left_max = 460
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        if self.left_panel is not None:
+            self.left_panel.setMaximumWidth(max(300, min(self.left_max, int(self.width() * 0.42))))
 
     def build(self, root: QWidget) -> None:  # pragma: no cover - abstract
         raise NotImplementedError

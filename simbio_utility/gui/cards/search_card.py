@@ -90,7 +90,9 @@ class SearchCard(Card):
 
         # ---------------- inputs ----------------
         left = Panel("Server folder")
-        left.setFixedWidth(420)
+        left.setMinimumWidth(300)
+        left.setMaximumWidth(420)
+        self.left_panel, self.left_max = left, 420
         left.body.addWidget(label("Folder URL", "muted"))
         self.url = QLineEdit(str(self.config.get("sk_url", "") or mkindex.DEFAULT_URL))
         self.url.setProperty("mono", True)
@@ -138,7 +140,7 @@ class SearchCard(Card):
         self.error.hide()
         left.body.addWidget(self.error)
         left.body.addStretch(1)
-        outer.addWidget(left)
+        outer.addWidget(left, 1)
 
         # ---------------- results ----------------
         right = QWidget()

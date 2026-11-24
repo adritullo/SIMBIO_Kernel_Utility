@@ -58,6 +58,31 @@ def test_nadir_camera_matches_analytic_orbit(session):
     assert g.phase_deg == pytest.approx(g.incidence_deg, abs=0.01)  # nadir -> phase == incidence
 
 
+def test_ground_speed_of_the_boresight_point(session):
+    et = ET("2027-06-20T12:00:00")
+    g = geometry.compute(HRIC, et)
+    r, R = mock.R_MERCURY + mock.ALT_KM, mock.R_MERCURY
+    v = math.sqrt(mock.GM_MERCURY / r)
+    # quarter-pixel smear: 0.25 * 5 m / ~2.39 km/s ~ 0.52 ms
+    assert g.smear_quarter_px_ms == pytest.approx(0.25 * g.resolution_m_px / (g.ground_speed_kms * 1e3) * 1e3, rel=1e-9)
+    assert 0.4 < g.smear_quarter_px_ms < 0.7
+    assert math.isnan(geometry.smear_time_ms(5.0, float("nan")))
+    # nadir, circular orbit: the intercept moves at v * R / r (planet rotation, ~3 m/s, is within the tolerance)
+    assert g.ground_speed_kms == pytest.approx(v * R / r, rel=3e-3)
+    # an off-nadir boresight hits the ground farther away along the orbit-normal tilt: its speed is still ~ omega * |point|
+    for cam in (STCH, STCL):
+        gt = geometry.compute(cam, et)
+        assert 0.8 * g.ground_speed_kms < gt.ground_speed_kms < 1.2 * g.ground_speed_kms
+    # edge of the MPO coverage: the 'before' epoch is not available -> one-sided difference, not an error
+    import spiceypy as sp
+    start = ET(mock.MPO_COVERAGE[0]) + 0.1
+    cam_id = sp.bodn2c(HRIC)
+    _s, frame, bsight, _n, _b = sp.getfov(cam_id, 100)
+    gs = geometry.GeometrySettings()
+    spoint = sp.sincpt(gs.method, gs.target, start, f"IAU_{gs.target}", gs.abcorr, gs.observer, frame, bsight)[0]
+    assert geometry.ground_speed_kms(gs, start, frame, bsight, spoint) == pytest.approx(g.ground_speed_kms, rel=2e-2)
+
+
 @pytest.mark.parametrize("cam,tilt", [(STCH, 20.0), (STCL, -20.0)])
 def test_tilted_camera_matches_sphere_geometry(session, cam, tilt):
     et = ET("2027-06-20T12:00:00")

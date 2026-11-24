@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (QButtonGroup, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QHBoxLayout,
-                               QLabel, QLineEdit, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
+                               QApplication, QLabel, QLineEdit, QMainWindow, QPushButton, QStackedWidget, QVBoxLayout, QWidget)
 
 from .. import APP_NAME, AUTHOR, __version__
 from ..config import AppConfig
@@ -16,6 +16,7 @@ from ..resources import example_mk_path, resource_path
 from .cards import CARDS
 from .cards.download_card import DownloadCard
 from .cards.geometry_card import GeometryCard
+from .cards.position_card import PositionCard
 from .cards.search_card import SearchCard
 from .cards.time_card import TimeCard
 from .widgets import Debouncer, label
@@ -81,6 +82,14 @@ class SettingsDialog(QDialog):
         self.evf_info.setWordWrap(True)
         self.evf.textChanged.connect(lambda *_: self._evf_status())
         self._evf_status()
+        self.ui_scale = QComboBox()
+        for v in (0.75, 0.85, 0.9, 1.0, 1.1, 1.25, 1.5):
+            self.ui_scale.addItem(f"{v * 100:.0f} %" + ("  (default)" if v == 1.0 else ""), v)
+        idx = min(range(self.ui_scale.count()), key=lambda i: abs(self.ui_scale.itemData(i) - cfg.ui_scale))
+        self.ui_scale.setCurrentIndex(idx)
+        self.ui_scale.setToolTip("Size of text and controls. Smaller values fit small laptop screens; applied after a restart.\n"
+                                 "It multiplies the Windows/macOS display scaling.")
+        form.addRow("Interface size", self.ui_scale)
         form.addRow("Aberration correction", self.abcorr)
         form.addRow("Longitude convention", self.lon)
         form.addRow("Season definition", row)
@@ -124,15 +133,22 @@ class SettingsDialog(QDialog):
         self.cfg.set("abcorr", self.abcorr.currentData())
         self.cfg.set("lon_domain", self.lon.currentData())
         self.cfg.set("season_json", self.seasons.text().strip())
+        new_scale = float(self.ui_scale.currentData())
+        changed = abs(new_scale - self.cfg.ui_scale) > 1e-3
+        self.cfg.set("ui_scale", new_scale)
         self.accept()
+        if changed:
+            from PySide6.QtWidgets import QMessageBox
+            if QMessageBox.question(self.parent(), "Interface size", "The new interface size is applied when the app restarts.\n\nRestart now?") == QMessageBox.Yes:
+                from .app import restart
+                restart()
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"{APP_NAME}")
-        self.resize(1320, 860)
-        self.setMinimumSize(1360, 720)
+        self.setMinimumSize(760, 500)  # cards scroll below their natural size (small laptops, 125-150 % scaling)
         self.setAcceptDrops(True)
         self.cfg = AppConfig()
         self.session = KernelSession()
@@ -224,19 +240,48 @@ class MainWindow(QMainWindow):
             if isinstance(c, SearchCard):
                 self.sk_card = c
         self.sk_card.use_metakernel = self._load_path  # checked: if its kernels are missing we go to Kernel Download
+        self.ps_card = next(c for c in self.cards if isinstance(c, PositionCard))
+        self.ps_card.open_in_geometry = self._pass_to_geometry
         self._dl_refresh = Debouncer(self.dl_card.refresh, 300)
         self.path.textChanged.connect(self._dl_refresh)
         self.dl_card.refresh()
 
-        if (g := self.cfg.get("window_geometry", None)) is not None:
-            try:
-                self.restoreGeometry(g)
-            except Exception:
-                pass
+        self._initial_geometry()
         if self.path.text() and Path(self.path.text()).is_file():
             QTimer.singleShot(150, self.load)
 
     # ------------------------------------------------------------------
+    def _initial_geometry(self) -> None:
+        """Restore the last window geometry, but never larger than the screen (the old default was 1360x720 minimum,
+        too big for 1366x768 laptops at 125 % scaling)."""
+        g = self.cfg.get("window_geometry", None)
+        restored = False
+        if g is not None:
+            try:
+                restored = bool(self.restoreGeometry(g))
+            except Exception:
+                restored = False
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            if not restored:
+                self.resize(1320, 860)
+            return
+        avail = screen.availableGeometry()
+        if restored and not self.isMaximized():
+            fr = self.frameGeometry()
+            if fr.width() <= avail.width() and fr.height() <= avail.height() and avail.contains(fr.center()):
+                return
+        w = min(1320, int(avail.width() * 0.94))
+        h = min(860, int(avail.height() * 0.90))
+        self.resize(max(w, self.minimumWidth()), max(h, self.minimumHeight()))
+        self.move(avail.x() + (avail.width() - self.width()) // 2, avail.y() + max(0, (avail.height() - self.height()) // 3))
+
+    def _pass_to_geometry(self, camera: str, et: float) -> None:
+        """Positional Search -> Observation Geometry at the best epoch of a pass, computed straight away."""
+        self.geo_card.select_camera(camera)
+        self._time_to_geometry(et)
+        self.geo_card.compute()
+
     def _time_to_geometry(self, et: float) -> None:
         self.geo_card.set_et(et)
         idx = self.cards.index(self.geo_card)
